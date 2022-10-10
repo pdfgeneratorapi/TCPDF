@@ -7360,29 +7360,31 @@ class TCPDF {
 			try {
 				// generate images
 				$img = imagecreatefrompng($file);
-				$imgalpha = imagecreate($wpx, $hpx);
-				// generate gray scale palette (0 -> 255)
-				for ($c = 0; $c < 256; ++$c) {
-					ImageColorAllocate($imgalpha, $c, $c, $c);
-				}
-				// extract alpha channel
-				for ($xpx = 0; $xpx < $wpx; ++$xpx) {
-					for ($ypx = 0; $ypx < $hpx; ++$ypx) {
-						$color = imagecolorat($img, $xpx, $ypx);
-						// get and correct gamma color
-						$alpha = $this->getGDgamma($img, $color);
-						imagesetpixel($imgalpha, (int) $xpx, (int) $ypx, (int) $alpha);
-					}
-				}
-				imagepng($imgalpha, $tempfile_alpha);
-				imagedestroy($imgalpha);
-				// extract image without alpha channel
-				$imgplain = imagecreatetruecolor($wpx, $hpx);
-				imagecopy($imgplain, $img, 0, 0, 0, 0, $wpx, $hpx);
-				imagepng($imgplain, $tempfile_plain);
-				imagedestroy($imgplain);
-				$parsed = true;
-			} catch (Exception $e) {
+				if ($img !== false) {
+                    $imgalpha = imagecreate($wpx, $hpx);
+                    // generate gray scale palette (0 -> 255)
+                    for ($c = 0; $c < 256; ++$c) {
+                        ImageColorAllocate($imgalpha, $c, $c, $c);
+                    }
+                    // extract alpha channel
+                    for ($xpx = 0; $xpx < $wpx; ++$xpx) {
+                        for ($ypx = 0; $ypx < $hpx; ++$ypx) {
+                            $color = imagecolorat($img, $xpx, $ypx);
+                            // get and correct gamma color
+                            $alpha = $this->getGDgamma($img, $color);
+                            imagesetpixel($imgalpha, (int) $xpx, (int) $ypx, (int) $alpha);
+                        }
+                    }
+                    imagepng($imgalpha, $tempfile_alpha);
+                    imagedestroy($imgalpha);
+                    // extract image without alpha channel
+                    $imgplain = imagecreatetruecolor($wpx, $hpx);
+                    imagecopy($imgplain, $img, 0, 0, 0, 0, $wpx, $hpx);
+                    imagepng($imgplain, $tempfile_plain);
+                    imagedestroy($imgplain);
+                    $parsed = true;
+                }
+            } catch (Exception $e) {
 				// GD fails
 				$parse_error = 'GD library error: '.$e->getMessage();
 			}
