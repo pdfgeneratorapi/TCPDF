@@ -7359,7 +7359,7 @@ class TCPDF {
 		if (($parsed === false) AND function_exists('imagecreatefrompng')) {
 			try {
 				// generate images
-				$img = imagecreatefrompng($file);
+                $img = imagecreatefrompng($file);
                 if ($img !== false) {
                     $imgalpha = imagecreate($wpx, $hpx);
                     // generate gray scale palette (0 -> 255)
