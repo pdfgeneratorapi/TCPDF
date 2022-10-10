@@ -7360,7 +7360,7 @@ class TCPDF {
 			try {
 				// generate images
 				$img = imagecreatefrompng($file);
-				if ($img !== false) {
+                if ($img !== false) {
                     $imgalpha = imagecreate($wpx, $hpx);
                     // generate gray scale palette (0 -> 255)
                     for ($c = 0; $c < 256; ++$c) {
@@ -7384,7 +7384,7 @@ class TCPDF {
                     imagedestroy($imgplain);
                     $parsed = true;
                 }
-            } catch (Exception $e) {
+        } catch (Exception $e) {
 				// GD fails
 				$parse_error = 'GD library error: '.$e->getMessage();
 			}
