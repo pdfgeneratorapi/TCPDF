@@ -7386,6 +7386,9 @@ class TCPDF {
 			try {
 				// generate images
 				$img = imagecreatefrompng($file);
+                if ($img === false) {
+                    throw new Exception('Unable to create image from file: '.$file);
+                }
 				$imgalpha = imagecreate($wpx, $hpx);
 				// generate gray scale palette (0 -> 255)
 				for ($c = 0; $c < 256; ++$c) {
