@@ -34,6 +34,9 @@ echo "php extension dir: ${PHP_EXT_DIR}"
 BCMATH_EXT="-d extension=$(find ${PHP_EXT_DIR} -type f -name 'bcmath.so')"
 echo "bcmath found at: ${BCMATH_EXT}"
 
+CURL_EXT="-d extension=$(find ${PHP_EXT_DIR} -type f -name 'curl.so')"
+echo "curl found at: ${CURL_EXT}"
+
 COVERAGE_EXTENSION="-d extension=pcov.so"
 IMAGICK_OR_GD="-dextension=gd.so"
 JSON_EXT="-dextension=json.so"
@@ -86,6 +89,7 @@ for file in $EXAMPLE_FILES; do
         -d date.timezone=UTC \
         ${IMAGICK_OR_GD} ${COVERAGE_EXTENSION} \
         ${BCMATH_EXT} \
+        ${CURL_EXT} \
         ${JSON_EXT} \
         ${XML_EXT} \
         -d display_errors=on \
@@ -121,6 +125,18 @@ for file in $EXAMPLE_FILES; do
             FAILED_FLAG=1
             echo "Generated-invalid-file: $file"
         fi
+        if [ "$file" = "examples/example_065.php" ] || [ "$file" = "examples/example_066.php" ] || [ "$file" = "examples/example_068.php" ]; then
+          VALIDATION_OUTPUT="$(docker run -v $TEMP_FOLDER:/data --quiet --rm -w /data/ pdfix/verapdf-validation:latest validate --format 'json' -i 'output.pdf')"
+          VALIDATION_RESULT="$(echo $VALIDATION_OUTPUT |  jq '.report.jobs[0].validationResult[0].compliant')"
+          if [ "$VALIDATION_RESULT" = "false" ]; then
+              FAILED_FLAG=1
+              echo "Generated pdf file failed validation: $file"
+              echo $VALIDATION_OUTPUT
+          else
+            VALIDATION_PROFILE="$(echo $VALIDATION_OUTPUT |  jq '.report.jobs[0].validationResult[0].profileName')"
+            echo "Pdf validated with $VALIDATION_PROFILE: $file"
+          fi
+        fi
     else
         FAILED_FLAG=1
         echo "File-run-failed: $file"
@@ -152,7 +168,9 @@ for file in $EXAMPLE_BARCODE_FILES; do
     ${PHP_BINARY} -n \
         -d include_path="${TEMP_FOLDER}" \
         -d date.timezone=UTC \
-        ${BCMATH_EXT} ${COVERAGE_EXTENSION} \
+        ${BCMATH_EXT} \
+        ${CURL_EXT} \
+        ${COVERAGE_EXTENSION} \
         -d display_errors=on \
         -d error_reporting=-1 \
         -d pcov.directory="${ROOT_DIR}" \
