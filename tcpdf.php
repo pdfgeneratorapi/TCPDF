@@ -8312,6 +8312,8 @@ class TCPDF {
 					}
 					if ($pl['opt']['subtype'] !== 'Link') {
 						$annots .= ' /Contents '.$this->_textstring($pl['txt'], $annot_obj_id);
+					} elseif (isset($pl['opt']['contents'])) {
+						$annots .= ' /Contents '.$this->_textstring($pl['opt']['contents'], $annot_obj_id);
 					}
 					$annots .= ' /P '.$this->page_obj_id[$n].' 0 R';
 					$annots .= ' /NM '.$this->_datastring(sprintf('%04u-%04u', $n, $key), $annot_obj_id);
