@@ -140,7 +140,7 @@ for file in $EXAMPLE_FILES; do
             FAILED_FLAG=1
             echo "Generated-invalid-file: $file"
         fi
-        if [ "$file" = "examples/example_065.php" ] || [ "$file" = "examples/example_066.php" ] || [ "$file" = "examples/example_068.php" ]; then
+        if [ "$file" = "examples/example_065.php" ] || [ "$file" = "examples/example_066.php" ] || [ "$file" = "examples/example_068.php" ] || [ "$file" = "examples/example_069.php" ]; then
           VALIDATION_OUTPUT="$(docker run -v $TEMP_FOLDER:/data --quiet --rm -w /data/ pdfix/verapdf-validation:latest validate --format 'json' -i 'output.pdf')"
           VALIDATION_RESULT="$(echo $VALIDATION_OUTPUT |  jq '.report.jobs[0].validationResult[0].compliant')"
           if [ "$VALIDATION_RESULT" = "false" ]; then
@@ -224,6 +224,22 @@ for file in $EXAMPLE_BARCODE_FILES; do
 done
 
 cd - > /dev/null
+
+echo "File: tests/pdfa_font_subsetting.php"
+set +e
+${PHP_BINARY} -n \
+    -d date.timezone=UTC \
+    ${BCMATH_EXT} \
+    ${CURL_EXT} \
+    -d display_errors=on \
+    -d error_reporting=-1 \
+    -d memory_limit=1G \
+    "${TESTS_DIR}/pdfa_font_subsetting.php"
+if [ $? -gt 0 ]; then
+    FAILED_FLAG=1
+    echo "File-run-failed: tests/pdfa_font_subsetting.php"
+fi
+set -e
 
 rm -rf "${TEMP_FOLDER}"
 

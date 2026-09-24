@@ -1783,6 +1783,13 @@ class TCPDF {
 	protected $pdfa_version = 1;
 
 	/**
+	 * If true, font subsetting is allowed in PDF/A mode (PDF/A-2 and PDF/A-3 only).
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected $pdfa_font_subsetting = false;
+
+	/**
 	 * Document creation date-time
 	 * @protected
 	 * @since 5.9.152 (2012-03-22)
@@ -4261,7 +4268,7 @@ class TCPDF {
 		if ($subset === 'default') {
 			$subset = $this->font_subsetting;
 		}
-		if ($this->pdfa_mode) {
+		if (!$this->isFontSubsettingAllowed()) {
 			$subset = false;
 		}
 		if (TCPDF_STATIC::empty_string($family)) {
@@ -22454,7 +22461,7 @@ class TCPDF {
 	 * @since 5.3.002 (2010-06-07)
 	 */
 	public function setFontSubsetting($enable=true) {
-		if ($this->pdfa_mode) {
+		if (!$this->isFontSubsettingAllowed()) {
 			$this->font_subsetting = false;
 		} else {
 			$this->font_subsetting = $enable ? true : false;
@@ -22470,6 +22477,38 @@ class TCPDF {
 	 */
 	public function getFontSubsetting() {
 		return $this->font_subsetting;
+	}
+
+	/**
+	 * Allow or disallow font subsetting in PDF/A mode.
+	 * Subsetting is applied only for PDF/A-2 and PDF/A-3, because PDF/A-1 requires a CIDSet stream that is not generated.
+	 * Call this method before setFontSubsetting(), because setFontSubsetting() disables subsetting when it is not allowed.
+	 * @param boolean $enable if true allow font subsetting in PDF/A mode.
+	 * @public
+	 * @since 6.11.4
+	 */
+	public function setPdfaFontSubsetting($enable=true) {
+		$this->pdfa_font_subsetting = $enable ? true : false;
+	}
+
+	/**
+	 * Return true if font subsetting is allowed in PDF/A mode.
+	 * @return bool
+	 * @public
+	 * @since 6.11.4
+	 */
+	public function getPdfaFontSubsetting() {
+		return $this->pdfa_font_subsetting;
+	}
+
+	/**
+	 * Return true if font subsetting can be used with the current PDF/A settings.
+	 * @return bool
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected function isFontSubsettingAllowed() {
+		return !$this->pdfa_mode || ($this->pdfa_font_subsetting && $this->pdfa_version >= 2);
 	}
 
 	/**
