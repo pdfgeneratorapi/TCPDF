@@ -239,6 +239,19 @@ if [ $? -gt 0 ]; then
     FAILED_FLAG=1
     echo "File-run-failed: tests/pdfa_font_subsetting.php"
 fi
+
+echo "File: tests/tcpdf_link.php"
+${PHP_BINARY} -n \
+    -d date.timezone=UTC \
+    ${BCMATH_EXT} \
+    ${CURL_EXT} \
+    -d display_errors=on \
+    -d error_reporting=-1 \
+    "${TESTS_DIR}/tcpdf_link.php"
+if [ $? -gt 0 ]; then
+    FAILED_FLAG=1
+    echo "File-run-failed: tests/tcpdf_link.php"
+fi
 set -e
 
 rm -rf "${TEMP_FOLDER}"
