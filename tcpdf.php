@@ -1856,6 +1856,20 @@ class TCPDF {
 	protected $tcpdflink = true;
 
 	/**
+	 * Custom text for the meta link (null = TCPDF default).
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected $tcpdflink_text = null;
+
+	/**
+	 * Custom URL for the meta link (null = TCPDF default).
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected $tcpdflink_url = null;
+
+	/**
 	 * Cache array for computed GD gamma values.
 	 * @protected
 	 * @since 5.9.1632 (2012-06-05)
@@ -3035,6 +3049,31 @@ class TCPDF {
 	}
 
 	/**
+	 * Enable or disable the hidden meta link printed at the bottom of the last page.
+	 * Disabling it does not change how the document is closed.
+	 * @param boolean $enable if true print the meta link.
+	 * @param string|null $text custom link text (null = TCPDF default).
+	 * @param string|null $url custom link URL (null = TCPDF default).
+	 * @public
+	 * @since 6.11.4
+	 */
+	public function setTCPDFLink($enable=true, $text=null, $url=null) {
+		$this->tcpdflink = (bool) $enable;
+		$this->tcpdflink_text = $text;
+		$this->tcpdflink_url = $url;
+	}
+
+	/**
+	 * Return true if the hidden meta link is enabled.
+	 * @return boolean
+	 * @public
+	 * @since 6.11.4
+	 */
+	public function getTCPDFLink() {
+		return $this->tcpdflink;
+	}
+
+	/**
 	 * Terminates the PDF document.
 	 * It is not necessary to call this method explicitly because Output() does it automatically.
 	 * If the document contains no page, AddPage() is called to prevent from getting an invalid document.
@@ -3050,11 +3089,12 @@ class TCPDF {
 			$this->AddPage();
 		}
 		$this->endLayer();
+		// save current graphic settings
+		$gvars = $this->getGraphicVars();
+		// move to the last page, so endPage() closes it (it skips pages before the last one)
+		$this->setEqualColumns();
+		$this->lastpage(true);
 		if ($this->tcpdflink) {
-			// save current graphic settings
-			$gvars = $this->getGraphicVars();
-			$this->setEqualColumns();
-			$this->lastpage(true);
 			$this->setAutoPageBreak(false);
 			$this->x = 0;
 			$this->y = $this->h - (1 / $this->k);
@@ -3065,11 +3105,17 @@ class TCPDF {
 			$this->setTextRenderingMode(0, false, false);
 			$msg = "\x50\x6f\x77\x65\x72\x65\x64\x20\x62\x79\x20\x54\x43\x50\x44\x46\x20\x28\x77\x77\x77\x2e\x74\x63\x70\x64\x66\x2e\x6f\x72\x67\x29";
 			$lnk = "\x68\x74\x74\x70\x3a\x2f\x2f\x77\x77\x77\x2e\x74\x63\x70\x64\x66\x2e\x6f\x72\x67";
+			if ($this->tcpdflink_text !== null) {
+				$msg = $this->tcpdflink_text;
+			}
+			if ($this->tcpdflink_url !== null) {
+				$lnk = $this->tcpdflink_url;
+			}
 			$this->Cell(0, 0, $msg, 0, 0, 'L', 0, $lnk, 0, false, 'D', 'B');
 			$this->_outRestoreGraphicsState();
-			// restore graphic settings
-			$this->setGraphicVars($gvars);
 		}
+		// restore graphic settings
+		$this->setGraphicVars($gvars);
 		// close page
 		$this->endPage();
 		// close document
