@@ -252,6 +252,21 @@ if [ $? -gt 0 ]; then
     FAILED_FLAG=1
     echo "File-run-failed: tests/tcpdf_link.php"
 fi
+
+for ACROFORM_RUN in "" "without-helvetica"; do
+    echo "File: tests/acroform_default_font.php ${ACROFORM_RUN}"
+    ${PHP_BINARY} -n \
+        -d date.timezone=UTC \
+        ${BCMATH_EXT} \
+        ${CURL_EXT} \
+        -d display_errors=on \
+        -d error_reporting=-1 \
+        "${TESTS_DIR}/acroform_default_font.php" ${ACROFORM_RUN}
+    if [ $? -gt 0 ]; then
+        FAILED_FLAG=1
+        echo "File-run-failed: tests/acroform_default_font.php ${ACROFORM_RUN}"
+    fi
+done
 set -e
 
 rm -rf "${TEMP_FOLDER}"

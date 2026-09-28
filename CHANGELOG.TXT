@@ -2,6 +2,7 @@
 	- Added setPdfaFontSubsetting() to allow font subsetting in PDF/A-2 and PDF/A-3 mode.
 	- Added setTCPDFLink() to disable the hidden meta link or set a custom text and URL.
 	- Fixed: disabling the meta link skipped the last page footer when the current page was not the last one.
+	- Fixed: the AcroForm /DA entry named a missing font when Helvetica was not loaded under the current PDF/A mode.
 
 6.11.3 (2026-04-21)
 	- Added deprecation notice.

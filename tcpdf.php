@@ -10049,7 +10049,17 @@ class TCPDF {
 				$out .= ' >> >>';
 			}
 			$font = $this->getFontBuffer((($this->pdfa_mode) ? 'pdfa' : '') .'helvetica');
-			$out .= ' /DA ' . $this->_datastring('/F'.$font['i'].' 0 Tf 0 g');
+			if ($font === false) {
+				// the PDF/A mode may have changed after the default font was loaded
+				$font = $this->getFontBuffer((($this->pdfa_mode) ? '' : 'pdfa') .'helvetica');
+			}
+			if (($font === false) AND !empty($this->annotation_fonts)) {
+				// fall back to a font already listed in /DR
+				$font = array('i' => reset($this->annotation_fonts));
+			}
+			if ($font !== false) {
+				$out .= ' /DA ' . $this->_datastring('/F'.$font['i'].' 0 Tf 0 g');
+			}
 			$out .= ' /Q '.(($this->rtl)?'2':'0');
 			//$out .= ' /XFA ';
 			$out .= ' >>';
