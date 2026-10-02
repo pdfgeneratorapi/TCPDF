@@ -101,6 +101,21 @@ Optional extensions for richer output in some workflows: `gd`, `zlib`, `imagick`
 
 ---
 
+## Running tests with Docker
+
+The test suite needs several PHP extensions, `poppler-utils` and veraPDF. To run it without installing them locally:
+
+```bash
+make docker-test                        # tests/launch.sh on PHP 8.1
+PHP_VERSION=8.3 make docker-test        # another PHP version
+make docker-verapdf FILE=out.pdf FLAVOUR=3b
+docker compose run --rm tests php tests/pdfa_font_subsetting.php
+```
+
+The `tests` service mounts the repository at its host path and uses the host Docker daemon for the veraPDF step, so Docker must be running. Coverage from pcov is written to `tests/coverage.lcov`.
+
+---
+
 ## Third-Party Fonts
 
 This library may include third-party font files released under different licenses.

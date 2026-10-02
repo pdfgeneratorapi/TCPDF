@@ -147,6 +147,8 @@ class TCPDF_FONTS {
 		// set encoding maps (if any)
 		$fmetric['enc'] = preg_replace('/[^A-Za-z0-9_\-]/', '', $enc);
 		$fmetric['diff'] = '';
+		// CIDs assigned to characters above U+FFFF (code point => CID)
+		$cidmap = array();
 		if (($fmetric['type'] == 'TrueType') OR ($fmetric['type'] == 'Type1')) {
 			if (!empty($enc) AND ($enc != 'cp1252') AND isset(TCPDF_FONT_DATA::$encmap[$enc])) {
 				// build differences from reference encoding
@@ -744,20 +746,8 @@ class TCPDF_FONTS {
 							break;
 						}
 						case 12: { // Format 12: Segmented coverage
-							$offset += 10; // skip length and version/language
-							$nGroups = TCPDF_STATIC::_getULONG($font, $offset);
-							$offset += 4;
-							for ($k = 0; $k < $nGroups; ++$k) {
-								$startCharCode = TCPDF_STATIC::_getULONG($font, $offset);
-								$offset += 4;
-								$endCharCode = TCPDF_STATIC::_getULONG($font, $offset);
-								$offset += 4;
-								$startGlyphCode = TCPDF_STATIC::_getULONG($font, $offset);
-								$offset += 4;
-								for ($c = $startCharCode; $c <= $endCharCode; ++$c) {
-									$ctg[$c] = $startGlyphCode;
-									++$startGlyphCode;
-								}
+							foreach (self::_getCmapFormat12($font, $offset - 2) as $c => $g) {
+								$ctg[$c] = $g;
 							}
 							break;
 						}
@@ -771,6 +761,14 @@ class TCPDF_FONTS {
 						}
 					}
 				}
+			}
+			if (($fmetric['type'] == 'TrueTypeUnicode') AND ($platid == 3) AND ($encid == 1)) {
+				// The (3,1) subtable only covers the BMP, so characters above U+FFFF
+				// come from the full repertoire subtable, when the font has one.
+				foreach (self::_getSupplementaryCmap($font, $table['cmap']['offset'], $encodingTables) as $c => $g) {
+					$ctg[$c] = $g;
+				}
+				$cidmap = self::allocateSupplementaryCids($ctg);
 			}
 			if (!isset($ctg[0])) {
 				$ctg[0] = 0;
@@ -803,7 +801,12 @@ class TCPDF_FONTS {
 			$fmetric['MissingWidth'] = $cw[0];
 			$fmetric['cw'] = '';
 			$fmetric['cbbox'] = '';
-			for ($cid = 0; $cid <= 65535; ++$cid) {
+			// widths and boxes are keyed by code point, also for characters above U+FFFF
+			$codepoints = range(0, 65535);
+			foreach ($cidmap as $c => $cid) {
+				$codepoints[] = $c;
+			}
+			foreach ($codepoints as $cid) {
 				if (isset($ctg[$cid])) {
 					if (isset($cw[$ctg[$cid]])) {
 						$fmetric['cw'] .= ','.$cid.'=>'.$cw[$ctg[$cid]];
@@ -881,10 +884,20 @@ class TCPDF_FONTS {
 				$pfile .= '$enc=\''.$fmetric['enc'].'\';'."\n";
 				$pfile .= '$file=\''.$fmetric['file'].'\';'."\n";
 				$pfile .= '$ctg=\''.$fmetric['ctg'].'\';'."\n";
+				if (!empty($cidmap)) {
+					$cidmapstr = '';
+					foreach ($cidmap as $c => $cid) {
+						$cidmapstr .= ','.$c.'=>'.$cid;
+					}
+					$pfile .= '$cidmap=array('.substr($cidmapstr, 1).');'."\n";
+				}
 				// create CIDToGIDMap
 				$cidtogidmap = str_pad('', 131072, "\x00"); // (256 * 256 * 2) = 131072
 				foreach ($ctg as $cid => $gid) {
 					$cidtogidmap = self::updateCIDtoGIDmap($cidtogidmap, $cid, $ctg[$cid]);
+				}
+				foreach ($cidmap as $c => $cid) {
+					$cidtogidmap = self::updateCIDtoGIDmap($cidtogidmap, $cid, $ctg[$c]);
 				}
 				// store compressed CIDToGIDMap
 				$fp = TCPDF_STATIC::fopenLocal($outpath.$fmetric['ctg'], 'wb');
@@ -1518,6 +1531,147 @@ class TCPDF_FONTS {
 	}
 
 	/**
+	 * Read a cmap format 12 subtable (segmented coverage).
+	 * @param string $font TrueType font data.
+	 * @param int $offset Offset of the subtable (its format field).
+	 * @return array Glyph indexes keyed by code point.
+	 * @public static
+	 */
+	public static function _getCmapFormat12($font, $offset) {
+		$ctg = array();
+		$offset += 12; // skip format, reserved, length and language
+		$nGroups = TCPDF_STATIC::_getULONG($font, $offset);
+		$offset += 4;
+		for ($k = 0; $k < $nGroups; ++$k) {
+			$startCharCode = TCPDF_STATIC::_getULONG($font, $offset);
+			$offset += 4;
+			$endCharCode = TCPDF_STATIC::_getULONG($font, $offset);
+			$offset += 4;
+			$startGlyphCode = TCPDF_STATIC::_getULONG($font, $offset);
+			$offset += 4;
+			for ($c = $startCharCode; $c <= $endCharCode; ++$c) {
+				$ctg[$c] = $startGlyphCode;
+				++$startGlyphCode;
+			}
+		}
+		return $ctg;
+	}
+
+	/**
+	 * Return the mappings above U+FFFF from the full Unicode repertoire cmap subtable.
+	 * The Windows (3,10) subtable is preferred, then any Unicode platform subtable in format 12.
+	 * @param string $font TrueType font data.
+	 * @param int $cmapoffset Offset of the cmap table.
+	 * @param array $encodingTables cmap encoding records (platformID, encodingID, offset).
+	 * @return array Glyph indexes keyed by code point.
+	 * @public static
+	 */
+	public static function _getSupplementaryCmap($font, $cmapoffset, $encodingTables) {
+		$found = false;
+		foreach ($encodingTables as $enctable) {
+			$offset = $cmapoffset + $enctable['offset'];
+			if (TCPDF_STATIC::_getUSHORT($font, $offset) != 12) {
+				continue;
+			}
+			if (($enctable['platformID'] == 3) AND ($enctable['encodingID'] == 10)) {
+				$found = $offset;
+				break;
+			}
+			if (($enctable['platformID'] == 0) AND ($found === false)) {
+				$found = $offset;
+			}
+		}
+		$ctg = array();
+		if ($found !== false) {
+			foreach (self::_getCmapFormat12($font, $found) as $c => $g) {
+				if ($c > 0xFFFF) {
+					$ctg[$c] = $g;
+				}
+			}
+		}
+		return $ctg;
+	}
+
+	/**
+	 * Assign 2-byte CIDs to the code points above U+FFFF of a font.
+	 * Identity-H uses the code point as CID, which is impossible above U+FFFF, so these
+	 * characters take CIDs that no BMP character of the font uses: the surrogate block
+	 * (U+D800-U+DFFF, which never holds characters) first, then the lowest other free CIDs.
+	 * Code points that find no free CID are left out.
+	 * @param array $ctg Glyph indexes keyed by code point.
+	 * @return array CIDs keyed by code point, in code point order.
+	 * @public static
+	 */
+	public static function allocateSupplementaryCids($ctg) {
+		$codepoints = array();
+		foreach ($ctg as $c => $gid) {
+			if ($c > 0xFFFF) {
+				$codepoints[] = $c;
+			}
+		}
+		sort($codepoints);
+		$cidmap = array();
+		$num = count($codepoints);
+		$i = 0;
+		// CID 0 stays reserved for .notdef
+		$ranges = array(array(0xD800, 0xDFFF), array(0x0001, 0xD7FF), array(0xE000, 0xFFFF));
+		foreach ($ranges as $range) {
+			for ($cid = $range[0]; ($cid <= $range[1]) AND ($i < $num); ++$cid) {
+				if (!isset($ctg[$cid])) {
+					$cidmap[$codepoints[$i]] = $cid;
+					++$i;
+				}
+			}
+		}
+		return $cidmap;
+	}
+
+	/**
+	 * Return the ToUnicode CMap for an Identity-H font.
+	 * Without remapped CIDs this is the standard identity CMap; otherwise the remapped CIDs
+	 * are left out of the identity ranges and mapped to their characters as UTF-16BE.
+	 * @param array $cidmap CIDs keyed by code point (characters above U+FFFF).
+	 * @return string ToUnicode CMap.
+	 * @public static
+	 */
+	public static function getToUnicodeCMap($cidmap) {
+		$cmap = TCPDF_FONT_DATA::$uni_identity_h;
+		if (empty($cidmap)) {
+			return $cmap;
+		}
+		$remapped = array_flip($cidmap);
+		ksort($remapped);
+		// identity ranges, which must not cross a change of the first byte
+		$ranges = array();
+		for ($hi = 0; $hi <= 0xFF00; $hi += 0x100) {
+			$first = -1;
+			for ($cid = $hi; $cid <= ($hi + 0x100); ++$cid) {
+				$skip = (($cid > ($hi + 0xFF)) OR isset($remapped[$cid]));
+				if ($skip AND ($first >= 0)) {
+					$ranges[] = sprintf('<%04x> <%04x> <%04x>', $first, ($cid - 1), $first);
+					$first = -1;
+				} elseif ((!$skip) AND ($first < 0)) {
+					$first = $cid;
+				}
+			}
+		}
+		$chars = array();
+		foreach ($remapped as $cid => $c) {
+			$chars[] = sprintf('<%04x> <%s>', $cid, bin2hex(self::arrUTF8ToUTF16BE(array($c))));
+		}
+		$body = '';
+		foreach (array_chunk($ranges, 100) as $chunk) {
+			$body .= count($chunk).' beginbfrange'."\n".implode("\n", $chunk)."\n".'endbfrange'."\n";
+		}
+		foreach (array_chunk($chars, 100) as $chunk) {
+			$body .= count($chunk).' beginbfchar'."\n".implode("\n", $chunk)."\n".'endbfchar'."\n";
+		}
+		$start = strpos($cmap, 'endcodespacerange') + strlen('endcodespacerange'."\n");
+		$end = strpos($cmap, 'endcmap');
+		return substr($cmap, 0, $start).$body.substr($cmap, $end);
+	}
+
+	/**
 	 * Return fonts path
 	 * @return string
 	 * @public static
@@ -1767,6 +1921,37 @@ class TCPDF_FONTS {
 				$outstr .= chr($w2 >> 0x08);
 				$outstr .= chr($w2 & 0xFF);
 			}
+		}
+		return $outstr;
+	}
+
+	/**
+	 * Converts an array of code points to the 2-byte CID string of an Identity-H font.
+	 * CIDs are the code points, except for characters above U+FFFF, which use the CIDs of the
+	 * font's CID map; those missing from it are written as CID 0 (.notdef).
+	 * Fonts without a CID map get the plain UTF-16BE string.
+	 * @param array $unicode array containing code points
+	 * @param array $font font data
+	 * @return string
+	 * @public static
+	 */
+	public static function arrUTF8ToCIDString($unicode, $font) {
+		if (empty($font['cidmap'])) {
+			return self::arrUTF8ToUTF16BE($unicode, false);
+		}
+		$outstr = '';
+		foreach ($unicode as $char) {
+			if ($char == 0x200b) {
+				// skip Unicode Character 'ZERO WIDTH SPACE' (DEC:8203, U+200B)
+				continue;
+			}
+			if ($char > 0xFFFF) {
+				$char = isset($font['cidmap'][$char]) ? $font['cidmap'][$char] : 0;
+			} elseif ((!isset($font['cw'][$char])) AND in_array($char, $font['cidmap'])) {
+				// the font has no glyph for this character and its CID belongs to one above U+FFFF
+				$char = 0;
+			}
+			$outstr .= chr($char >> 0x08).chr($char & 0xFF);
 		}
 		return $outstr;
 	}
