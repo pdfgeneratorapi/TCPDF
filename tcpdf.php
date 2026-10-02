@@ -4424,6 +4424,7 @@ class TCPDF {
 			$cidinfo=null;
 			$file=null;
 			$ctg=null;
+			$cidmap=null;
 			$diff=null;
 			$originalsize=null;
 			$size1=null;
@@ -4449,6 +4450,9 @@ class TCPDF {
 		}
 		if (!isset($ctg) OR TCPDF_STATIC::empty_string($ctg)) {
 			$ctg = '';
+		}
+		if (!isset($cidmap) OR !is_array($cidmap)) {
+			$cidmap = array();
 		}
 		if (!isset($desc) OR TCPDF_STATIC::empty_string($desc)) {
 			$desc = array();
@@ -4526,7 +4530,7 @@ class TCPDF {
 		}
 		// initialize subsetchars
 		$subsetchars = array_fill(0, 255, true);
-		$this->setFontBuffer($fontkey, array('fontkey' => $fontkey, 'i' => $this->numfonts, 'type' => $type, 'name' => $name, 'desc' => $desc, 'up' => $up, 'ut' => $ut, 'cw' => $cw, 'cbbox' => $cbbox, 'dw' => $dw, 'enc' => $enc, 'cidinfo' => $cidinfo, 'file' => $file, 'ctg' => $ctg, 'subset' => $subset, 'subsetchars' => $subsetchars));
+		$this->setFontBuffer($fontkey, array('fontkey' => $fontkey, 'i' => $this->numfonts, 'type' => $type, 'name' => $name, 'desc' => $desc, 'up' => $up, 'ut' => $ut, 'cw' => $cw, 'cbbox' => $cbbox, 'dw' => $dw, 'enc' => $enc, 'cidinfo' => $cidinfo, 'file' => $file, 'ctg' => $ctg, 'cidmap' => $cidmap, 'subset' => $subset, 'subsetchars' => $subsetchars));
 		if ($this->inxobj) {
 			// we are inside an XObject template
 			$this->xobjects[$this->xobjid]['fonts'][$fontkey] = $this->numfonts;
@@ -5519,7 +5523,7 @@ class TCPDF {
 						// update font subsetchars
 						$this->setFontSubBuffer($this->CurrentFont['fontkey'], 'subsetchars', $this->CurrentFont['subsetchars']);
 					} // end of K_THAI_TOPCHARS
-					$txt2 = TCPDF_FONTS::arrUTF8ToUTF16BE($unicode, false);
+					$txt2 = TCPDF_FONTS::arrUTF8ToCIDString($unicode, $this->CurrentFont);
 				}
 			}
 			$txt2 = TCPDF_STATIC::_escape($txt2);
@@ -9123,6 +9127,39 @@ class TCPDF {
 	}
 
 	/**
+	 * Return the font data with widths and used characters keyed by CID instead of code point.
+	 * The two differ only for characters above U+FFFF, which use the CIDs of the font's CID map.
+	 * @param array $font font data
+	 * @return array font data
+	 * @protected
+	 */
+	protected function getCIDKeyedWidths($font) {
+		if (empty($font['cidmap'])) {
+			return $font;
+		}
+		// widths and used characters are keyed by code point: move the ones above U+FFFF to their CIDs
+		$cw = array();
+		foreach ($font['cw'] as $c => $width) {
+			if ($c <= 0xFFFF) {
+				$cw[$c] = $width;
+			} elseif (isset($font['cidmap'][$c])) {
+				$cw[$font['cidmap'][$c]] = $width;
+			}
+		}
+		$subsetchars = array();
+		foreach ($font['subsetchars'] as $c => $used) {
+			if ($c <= 0xFFFF) {
+				$subsetchars[$c] = $used;
+			} elseif (isset($font['cidmap'][$c])) {
+				$subsetchars[$font['cidmap'][$c]] = $used;
+			}
+		}
+		$font['cw'] = $cw;
+		$font['subsetchars'] = $subsetchars;
+		return $font;
+	}
+
+	/**
 	 * Adds unicode fonts.<br>
 	 * Based on PDF Reference 1.3 (section 5)
 	 * @param array $font font data
@@ -9153,7 +9190,7 @@ class TCPDF {
 		$out .= "\n".'endobj';
 		$this->_out($out);
 		// ToUnicode map for Identity-H
-		$stream = TCPDF_FONT_DATA::$uni_identity_h;
+		$stream = TCPDF_FONTS::getToUnicodeCMap($font['cidmap']);
 		// ToUnicode Object
 		$this->_newobj();
 		$stream = ($this->compress) ? gzcompress($stream) : $stream;
@@ -9173,7 +9210,7 @@ class TCPDF {
 		$out .= ' /CIDSystemInfo << '.$cidinfo.' >>';
 		$out .= ' /FontDescriptor '.($this->n + 1).' 0 R';
 		$out .= ' /DW '.$font['dw']; // default width
-		$out .= "\n".TCPDF_FONTS::_putfontwidths($font, 0);
+		$out .= "\n".TCPDF_FONTS::_putfontwidths($this->getCIDKeyedWidths($font), 0);
 		if (isset($font['ctg']) AND (!TCPDF_STATIC::empty_string($font['ctg']))) {
 			$out .= "\n".'/CIDToGIDMap '.($this->n + 2).' 0 R';
 		}

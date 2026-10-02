@@ -3,6 +3,7 @@
 	- Added setTCPDFLink() to disable the hidden meta link or set a custom text and URL.
 	- Fixed: disabling the meta link skipped the last page footer when the current page was not the last one.
 	- Fixed: the AcroForm /DA entry named a missing font when Helvetica was not loaded under the current PDF/A mode.
+	- Added support for characters above U+FFFF in TrueType Unicode fonts: addTTFfont() imports them from the cmap format 12 subtable and assigns them free CIDs ($cidmap in the font definition), and the content stream, /W widths, CIDToGIDMap and ToUnicode CMap follow that mapping. Fonts without such characters are unchanged.
 
 6.11.3 (2026-04-21)
 	- Added deprecation notice.
