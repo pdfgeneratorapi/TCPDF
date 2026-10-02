@@ -19,7 +19,7 @@ EXAMPLE_FILES="$(find examples/ -type f -name 'example*.php' \
 EXAMPLE_BARCODE_FILES="$(find examples/barcodes -type f -name 'example*.php' \
                 | sort -df)"
 
-TEMP_FOLDER="$(mktemp -d /tmp/TCPDF-tests.XXXXXXXXX)"
+TEMP_FOLDER="$(mktemp -d "${TMPDIR:-/tmp}/TCPDF-tests.XXXXXXXXX")"
 OUTPUT_FILE="${TEMP_FOLDER}/output.pdf"
 OUTPUT_FILE_ERROR="${TEMP_FOLDER}/errors.txt"
 # Allows you to use PHP_BINARY="php8.1" ./tests/launch.sh

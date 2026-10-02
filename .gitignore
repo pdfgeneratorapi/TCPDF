@@ -4,3 +4,5 @@
 /vendor/
 /composer.lock
 /composer.phar
+/target/
+/tests/coverage.lcov

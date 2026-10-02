@@ -1,0 +1,31 @@
+# Test environment, so the suite can run without installing PHP extensions,
+# poppler-utils or veraPDF locally. See "Running tests with Docker" in README.md.
+#
+# The repository is mounted at the same absolute path as on the host, and
+# temporary files are kept inside it, because tests/launch.sh starts the
+# veraPDF container through the host Docker daemon with a bind mount of its
+# temporary folder: that path has to exist on the host too.
+services:
+  tests:
+    build:
+      context: tests/docker
+      args:
+        PHP_VERSION: ${PHP_VERSION:-8.1}
+    image: tcpdf-tests:php${PHP_VERSION:-8.1}
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
+    group_add:
+      - "${DOCKER_GID:-0}"
+    working_dir: ${PWD}
+    volumes:
+      - ${PWD}:${PWD}
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      TMPDIR: ${PWD}/target/tmp
+    command: ["sh", "-c", "mkdir -p target/tmp && make test"]
+
+  verapdf:
+    image: pdfix/verapdf-validation:latest
+    user: "${HOST_UID:-0}:${HOST_GID:-0}"
+    working_dir: ${PWD}
+    volumes:
+      - ${PWD}:${PWD}

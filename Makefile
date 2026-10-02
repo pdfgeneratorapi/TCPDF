@@ -140,6 +140,20 @@ tag:
 test:
 	XDEBUG_MODE=coverage sh ./tests/launch.sh
 
+# Run docker compose as the current user, with access to the Docker socket for the veraPDF step
+DOCKER_RUN=HOST_UID=$(shell id -u) HOST_GID=$(shell id -g) DOCKER_GID=$(shell stat -c %g /var/run/docker.sock 2>/dev/null || echo 0) docker compose run --rm
+
+## Run the integration tests inside the Docker test environment (PHP_VERSION=8.1 by default)
+.PHONY: docker-test
+docker-test: ensuretarget
+	mkdir -p $(TARGETDIR)/tmp
+	$(DOCKER_RUN) tests
+
+## Validate a PDF with veraPDF in Docker: make docker-verapdf FILE=path/to.pdf [FLAVOUR=3b]
+.PHONY: docker-verapdf
+docker-verapdf:
+	$(DOCKER_RUN) verapdf validate --format text -i $(realpath $(FILE)) $(if $(FLAVOUR),--flavour $(FLAVOUR))
+
 ## Set the code version from the VERSION file
 .PHONY: version
 version:
