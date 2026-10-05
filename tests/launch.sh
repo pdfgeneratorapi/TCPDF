@@ -19,7 +19,7 @@ EXAMPLE_FILES="$(find examples/ -type f -name 'example*.php' \
 EXAMPLE_BARCODE_FILES="$(find examples/barcodes -type f -name 'example*.php' \
                 | sort -df)"
 
-TEMP_FOLDER="$(mktemp -d /tmp/TCPDF-tests.XXXXXXXXX)"
+TEMP_FOLDER="$(mktemp -d "${TMPDIR:-/tmp}/TCPDF-tests.XXXXXXXXX")"
 OUTPUT_FILE="${TEMP_FOLDER}/output.pdf"
 OUTPUT_FILE_ERROR="${TEMP_FOLDER}/errors.txt"
 # Allows you to use PHP_BINARY="php8.1" ./tests/launch.sh
@@ -251,6 +251,31 @@ ${PHP_BINARY} -n \
 if [ $? -gt 0 ]; then
     FAILED_FLAG=1
     echo "File-run-failed: tests/tcpdf_link.php"
+fi
+
+echo "File: tests/supplementary_plane.php"
+${PHP_BINARY} -n \
+    -d date.timezone=UTC \
+    ${BCMATH_EXT} \
+    ${CURL_EXT} \
+    -d display_errors=on \
+    -d error_reporting=-1 \
+    -d memory_limit=1G \
+    "${TESTS_DIR}/supplementary_plane.php" "${OUTPUT_FILE}"
+if [ $? -gt 0 ]; then
+    FAILED_FLAG=1
+    echo "File-run-failed: tests/supplementary_plane.php"
+else
+    VALIDATION_OUTPUT="$(docker run -v $TEMP_FOLDER:/data --quiet --rm -w /data/ pdfix/verapdf-validation:latest validate --format 'json' -i 'output.pdf')"
+    VALIDATION_RESULT="$(echo $VALIDATION_OUTPUT |  jq '.report.jobs[0].validationResult[0].compliant')"
+    if [ "$VALIDATION_RESULT" = "false" ]; then
+        FAILED_FLAG=1
+        echo "Generated pdf file failed validation: tests/supplementary_plane.php"
+        echo $VALIDATION_OUTPUT
+    else
+        VALIDATION_PROFILE="$(echo $VALIDATION_OUTPUT |  jq '.report.jobs[0].validationResult[0].profileName')"
+        echo "Pdf validated with $VALIDATION_PROFILE: tests/supplementary_plane.php"
+    fi
 fi
 
 for ACROFORM_RUN in "" "without-helvetica"; do
