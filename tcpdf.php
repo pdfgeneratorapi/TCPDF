@@ -1805,6 +1805,13 @@ class TCPDF {
 	protected $glyph_fallback_definitions = array();
 
 	/**
+	 * Glyph fallback font keys found so far, by the current font's key and code point; false where no fallback font has the glyph.
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected $glyph_fallback_keys = array();
+
+	/**
 	 * Document creation date-time
 	 * @protected
 	 * @since 5.9.152 (2012-03-22)
@@ -4311,21 +4318,29 @@ class TCPDF {
 		if (empty($this->glyph_fallback_fonts) OR ($char < 32) OR !isset($this->CurrentFont['type']) OR ($this->CurrentFont['type'] != 'TrueTypeUnicode') OR isset($this->CurrentFont['cw'][$char])) {
 			return null;
 		}
+		// the current font's key carries the bold and italic the fallback is looked up in
+		$current = $this->CurrentFont['fontkey'];
+		if (isset($this->glyph_fallback_keys[$current][$char])) {
+			return ($this->glyph_fallback_keys[$current][$char] === false) ? null : $this->glyph_fallback_keys[$current][$char];
+		}
+		$found = null;
 		// bold and italic select the font; underline, line-through and overline do not
 		$style = str_replace(array('U', 'D', 'O'), '', strtoupper((string) $this->FontStyle));
 		foreach ($this->glyph_fallback_fonts as $family) {
 			$fontkey = $family.$style;
-			if ($fontkey == $this->CurrentFont['fontkey']) {
+			if ($fontkey == $current) {
 				continue;
 			}
 			if (!array_key_exists($fontkey, $this->glyph_fallback_definitions)) {
 				$this->glyph_fallback_definitions[$fontkey] = $this->readGlyphFallbackDefinition($family, $style);
 			}
 			if (($this->glyph_fallback_definitions[$fontkey] !== false) AND isset($this->glyph_fallback_definitions[$fontkey]['cw'][$char])) {
-				return $fontkey;
+				$found = $fontkey;
+				break;
 			}
 		}
-		return null;
+		$this->glyph_fallback_keys[$current][$char] = ($found === null) ? false : $found;
+		return $found;
 	}
 
 	/**
@@ -4361,14 +4376,23 @@ class TCPDF {
 	 * @since 6.11.4
 	 */
 	protected function getGlyphFallbackRuns($unicode) {
-		if (empty($this->glyph_fallback_fonts)) {
+		if (empty($this->glyph_fallback_fonts) OR !isset($this->CurrentFont['cw'])) {
+			return null;
+		}
+		// Text the current font can draw in full, nearly all of it, is ruled out in one pass rather than a call per character
+		$fallbacks = array();
+		foreach (array_keys(array_diff_key(array_flip($unicode), $this->CurrentFont['cw'])) as $char) {
+			$fontkey = $this->getGlyphFallbackFontKey($char);
+			if ($fontkey !== null) {
+				$fallbacks[$char] = $fontkey;
+			}
+		}
+		if (empty($fallbacks)) {
 			return null;
 		}
 		$runs = array();
-		$fallback = false;
 		foreach ($unicode as $char) {
-			$fontkey = $this->getGlyphFallbackFontKey($char);
-			$fallback = ($fallback || ($fontkey !== null));
+			$fontkey = isset($fallbacks[$char]) ? $fallbacks[$char] : null;
 			$last = count($runs) - 1;
 			if (($last >= 0) AND ($runs[$last]['fontkey'] === $fontkey)) {
 				$runs[$last]['chars'][] = $char;
@@ -4376,7 +4400,7 @@ class TCPDF {
 				$runs[] = array('fontkey' => $fontkey, 'chars' => array($char));
 			}
 		}
-		return $fallback ? $runs : null;
+		return $runs;
 	}
 
 	/**
@@ -22752,6 +22776,7 @@ class TCPDF {
 	 */
 	public function setGlyphFallbackFonts($families) {
 		$this->glyph_fallback_fonts = array();
+		$this->glyph_fallback_keys = array();
 		foreach ((array) $families as $family) {
 			$family = str_replace(' ', '', strtolower((string) $family));
 			if (($family !== '') AND !in_array($family, $this->glyph_fallback_fonts, true)) {
