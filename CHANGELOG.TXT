@@ -4,6 +4,7 @@
 	- Fixed: disabling the meta link skipped the last page footer when the current page was not the last one.
 	- Fixed: the AcroForm /DA entry named a missing font when Helvetica was not loaded under the current PDF/A mode.
 	- Added support for characters above U+FFFF in TrueType Unicode fonts: addTTFfont() imports them from the cmap format 12 subtable and assigns them free CIDs ($cidmap in the font definition), and the content stream, /W widths, CIDToGIDMap and ToUnicode CMap follow that mapping. Fonts without such characters are unchanged.
+	- Added setGlyphFallbackFonts(): a character the current TrueType Unicode font has no glyph for is measured and printed with the first fallback font that has it, in the current style, so lines are broken and aligned with the width it is drawn with. A fallback font is added to the document only when a character is printed with it, and text the current font can draw is written as before.
 
 6.11.3 (2026-04-21)
 	- Added deprecation notice.

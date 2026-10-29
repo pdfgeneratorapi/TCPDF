@@ -1790,6 +1790,21 @@ class TCPDF {
 	protected $pdfa_font_subsetting = false;
 
 	/**
+	 * Font families that draw a character the current font has no glyph for, in order of preference.
+	 * @protected
+	 * @since 6.11.4
+	 * @see setGlyphFallbackFonts()
+	 */
+	protected $glyph_fallback_fonts = array();
+
+	/**
+	 * Glyph fallback fonts by font key: family, style and glyph widths, read from the font definition without adding the font to the document; false for a font without a TrueType Unicode definition.
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected $glyph_fallback_definitions = array();
+
+	/**
 	 * Document creation date-time
 	 * @protected
 	 * @since 5.9.152 (2012-03-22)
@@ -4255,6 +4270,9 @@ class TCPDF {
 		}
 		if (isset($this->CurrentFont['cw'][intval($char)])) {
 			$w = $this->CurrentFont['cw'][intval($char)];
+		} elseif (($fallback = $this->getGlyphFallbackFontKey(intval($char))) !== null) {
+			// printed with a glyph fallback font
+			$w = $this->glyph_fallback_definitions[$fallback]['cw'][intval($char)];
 		} elseif (isset($this->CurrentFont['dw'])) {
 			// default width
 			$w = $this->CurrentFont['dw'];
@@ -4279,6 +4297,126 @@ class TCPDF {
 			return count(TCPDF_FONTS::UTF8StringToArray($s, $this->isunicode, $this->CurrentFont));
 		}
 		return strlen($s);
+	}
+
+	/**
+	 * Return the key of the glyph fallback font that prints a character the current font has no glyph for.
+	 * @param int $char Unicode code point
+	 * @return string|null font key, as AddFont() names the font in the current style; null when the current font has the glyph, is not a TrueType Unicode font, or no fallback font has the glyph
+	 * @protected
+	 * @since 6.11.4
+	 * @see setGlyphFallbackFonts()
+	 */
+	protected function getGlyphFallbackFontKey($char) {
+		if (empty($this->glyph_fallback_fonts) OR ($char < 32) OR !isset($this->CurrentFont['type']) OR ($this->CurrentFont['type'] != 'TrueTypeUnicode') OR isset($this->CurrentFont['cw'][$char])) {
+			return null;
+		}
+		// bold and italic select the font; underline, line-through and overline do not
+		$style = str_replace(array('U', 'D', 'O'), '', strtoupper((string) $this->FontStyle));
+		foreach ($this->glyph_fallback_fonts as $family) {
+			$fontkey = $family.$style;
+			if ($fontkey == $this->CurrentFont['fontkey']) {
+				continue;
+			}
+			if (!array_key_exists($fontkey, $this->glyph_fallback_definitions)) {
+				$this->glyph_fallback_definitions[$fontkey] = $this->readGlyphFallbackDefinition($family, $style);
+			}
+			if (($this->glyph_fallback_definitions[$fontkey] !== false) AND isset($this->glyph_fallback_definitions[$fontkey]['cw'][$char])) {
+				return $fontkey;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Read the glyph widths of a glyph fallback font from its definition file, found as AddFont() finds it, without adding the font to the document.
+	 * @param string $family font family
+	 * @param string $style font style: '', 'B', 'I' or 'BI'
+	 * @return array|false family, style and glyph widths keyed by code point; false when there is no TrueType Unicode definition
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected function readGlyphFallbackDefinition($family, $style) {
+		$fontfile = TCPDF_FONTS::getFontFullPath($family.strtolower($style).'.php');
+		if (TCPDF_STATIC::empty_string($fontfile)) {
+			$fontfile = TCPDF_FONTS::getFontFullPath($family.'.php');
+		}
+		if (TCPDF_STATIC::empty_string($fontfile)) {
+			return false;
+		}
+		$type = null;
+		$cw = null;
+		include($fontfile);
+		if (($type != 'TrueTypeUnicode') OR !is_array($cw)) {
+			return false;
+		}
+		return array('family' => $family, 'style' => $style, 'cw' => $cw);
+	}
+
+	/**
+	 * Split text into runs of the font that prints them: the current font, or the glyph fallback font of the characters it has no glyph for.
+	 * @param array $unicode Unicode code points of the text
+	 * @return array|null runs, each with 'fontkey' (null for the current font) and 'chars'; null when every character is printed with the current font
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected function getGlyphFallbackRuns($unicode) {
+		if (empty($this->glyph_fallback_fonts)) {
+			return null;
+		}
+		$runs = array();
+		$fallback = false;
+		foreach ($unicode as $char) {
+			$fontkey = $this->getGlyphFallbackFontKey($char);
+			$fallback = ($fallback || ($fontkey !== null));
+			$last = count($runs) - 1;
+			if (($last >= 0) AND ($runs[$last]['fontkey'] === $fontkey)) {
+				$runs[$last]['chars'][] = $char;
+			} else {
+				$runs[] = array('fontkey' => $fontkey, 'chars' => array($char));
+			}
+		}
+		return $fallback ? $runs : null;
+	}
+
+	/**
+	 * Return the text operators that print runs of text in their fonts, ending in the current font, which the page keeps using.
+	 * A glyph fallback font is added to the document here, with the characters it prints in its subset.
+	 * @param array $runs runs of text, as getGlyphFallbackRuns() returns them
+	 * @param float|null $spacewidth extra space width for Unicode justification, in thousandths of a text space unit; null when the text is not justified that way
+	 * @return string
+	 * @protected
+	 * @since 6.11.4
+	 */
+	protected function getGlyphFallbackText($runs, $spacewidth) {
+		$out = array();
+		$printing = null;
+		foreach ($runs as $run) {
+			$font = $this->CurrentFont;
+			if ($run['fontkey'] !== null) {
+				$definition = $this->glyph_fallback_definitions[$run['fontkey']];
+				// the current style keeps the underline, line-through and overline that AddFont() sets
+				$this->AddFont($definition['family'], $this->FontStyle);
+				$font = $this->getFontBuffer($run['fontkey']);
+				foreach ($run['chars'] as $char) {
+					$font['subsetchars'][$char] = true;
+				}
+				$this->setFontSubBuffer($run['fontkey'], 'subsetchars', $font['subsetchars']);
+			}
+			if ($run['fontkey'] !== $printing) {
+				$out[] = sprintf('/F%d %F Tf', $font['i'], $this->FontSizePt);
+				$printing = $run['fontkey'];
+			}
+			$str = TCPDF_STATIC::_escape(TCPDF_FONTS::arrUTF8ToCIDString($run['chars'], $font));
+			if ($spacewidth !== null) {
+				$str = str_replace(chr(0).chr(32), ') '.sprintf('%F', $spacewidth).' (', $str);
+			}
+			$out[] = '[('.str_replace("\r", ' ', $str).')] TJ';
+		}
+		if ($printing !== null) {
+			$out[] = sprintf('/F%d %F Tf', $this->CurrentFont['i'], $this->FontSizePt);
+		}
+		return implode(' ', $out);
 	}
 
 	/**
@@ -5426,6 +5564,9 @@ class TCPDF {
 		$s .= $this->getCellBorder($x, $y, $w, $h, $border);
 		if ($txt != '') {
 			$txt2 = $txt;
+			// runs of text in glyph fallback fonts, if any
+			$fallback_runs = null;
+			$unicode_justification = false;
 			if ($this->isunicode) {
 				if (($this->CurrentFont['type'] == 'core') OR ($this->CurrentFont['type'] == 'TrueType') OR ($this->CurrentFont['type'] == 'Type1')) {
 					$txt2 = TCPDF_FONTS::UTF8ToLatin1($txt2, $this->isunicode, $this->CurrentFont);
@@ -5524,6 +5665,7 @@ class TCPDF {
 						$this->setFontSubBuffer($this->CurrentFont['fontkey'], 'subsetchars', $this->CurrentFont['subsetchars']);
 					} // end of K_THAI_TOPCHARS
 					$txt2 = TCPDF_FONTS::arrUTF8ToCIDString($unicode, $this->CurrentFont);
+					$fallback_runs = $this->getGlyphFallbackRuns($unicode);
 				}
 			}
 			$txt2 = TCPDF_STATIC::_escape($txt2);
@@ -5638,7 +5780,12 @@ class TCPDF {
 			}
 			$xdk = $xdx * $k;
 			// print text
-			$s .= sprintf('BT %F %F Td [(%s)] TJ ET', $xdk, (($this->h - $basefonty) * $k), $txt2);
+			if ($fallback_runs === null) {
+				$s .= sprintf('BT %F %F Td [(%s)] TJ ET', $xdk, (($this->h - $basefonty) * $k), $txt2);
+			} else {
+				// a run per font, as the characters the current font has no glyph for are printed with a glyph fallback font
+				$s .= sprintf('BT %F %F Td %s ET', $xdk, (($this->h - $basefonty) * $k), $this->getGlyphFallbackText($fallback_runs, ($unicode_justification ? $spacewidth : null)));
+			}
 			if (isset($uniblock)) { // @phpstan-ignore-line
 				// print overlapping characters as separate string
 				$xshift = 0; // horizontal shift
@@ -22592,6 +22739,36 @@ class TCPDF {
 	 */
 	public function getPdfaFontSubsetting() {
 		return $this->pdfa_font_subsetting;
+	}
+
+	/**
+	 * Set the font families that draw a character the current TrueType Unicode font has no glyph for, in order of preference.
+	 * Such a character is measured and printed with the first of them that has a glyph for it, in the current style (bold, italic), so lines are broken and aligned with the width it is drawn with.
+	 * A fallback font is added to the document only when a character is printed with it, and text the current font can draw is written as without a fallback.
+	 * An empty array, the default, disables the fallback.
+	 * @param array $families font family names, as for setFont(), e.g. array('dejavusans')
+	 * @public
+	 * @since 6.11.4
+	 */
+	public function setGlyphFallbackFonts($families) {
+		$this->glyph_fallback_fonts = array();
+		foreach ((array) $families as $family) {
+			$family = str_replace(' ', '', strtolower((string) $family));
+			if (($family !== '') AND !in_array($family, $this->glyph_fallback_fonts, true)) {
+				$this->glyph_fallback_fonts[] = $family;
+			}
+		}
+	}
+
+	/**
+	 * Return the glyph fallback font families.
+	 * @return array
+	 * @public
+	 * @since 6.11.4
+	 * @see setGlyphFallbackFonts()
+	 */
+	public function getGlyphFallbackFonts() {
+		return $this->glyph_fallback_fonts;
 	}
 
 	/**

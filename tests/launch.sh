@@ -225,8 +225,22 @@ done
 
 cd - > /dev/null
 
-echo "File: tests/pdfa_font_subsetting.php"
+echo "File: tests/glyph_fallback.php"
 set +e
+${PHP_BINARY} -n \
+    -d date.timezone=UTC \
+    ${BCMATH_EXT} \
+    ${CURL_EXT} \
+    -d display_errors=on \
+    -d error_reporting=-1 \
+    -d memory_limit=1G \
+    "${TESTS_DIR}/glyph_fallback.php"
+if [ $? -gt 0 ]; then
+    FAILED_FLAG=1
+    echo "File-run-failed: tests/glyph_fallback.php"
+fi
+
+echo "File: tests/pdfa_font_subsetting.php"
 ${PHP_BINARY} -n \
     -d date.timezone=UTC \
     ${BCMATH_EXT} \
