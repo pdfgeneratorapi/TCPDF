@@ -1709,10 +1709,16 @@ class TCPDF {
 	protected $svgpatternstack = array();
 
 	/**
-	 * Rules of the SVG style elements with a simple selector, in cascade order.
+	 * Rules of the SVG style elements, in cascade order.
 	 * @protected
 	 */
 	protected $svgcssrules = array();
+
+	/**
+	 * The SVG elements open around the one being parsed, outermost first: name, id and classes.
+	 * @protected
+	 */
+	protected $svgancestors = array();
 
 	/**
 	 * Most pattern tiles one SVG fill may lay; a fill that needs more paints its fallback instead.
@@ -23406,6 +23412,7 @@ class TCPDF {
 		$this->svgpatternrecord = array();
 		$this->svgpatternstack = array();
 		$this->svgcssrules = array();
+		$this->svgancestors = array();
 		$this->svgstyles = array($this->svgstyles[0]);
 		$this->svg_tag_depth = 0;
 		if ($this->rasterize_vector_images AND ($w > 0) AND ($h > 0)) {
@@ -24088,9 +24095,9 @@ class TCPDF {
 	}
 
 	/**
-	 * Rules of the style elements of an SVG document, keeping those with a simple selector: a type, the
-	 * universal selector, classes and ids, or a list of them. Rules with combinators, pseudo-classes,
-	 * attribute selectors or inside at-rules are left out.
+	 * Rules of the style elements of an SVG document, keeping those whose selectors are made of types, the
+	 * universal selector, classes and ids, joined by descendant or child combinators, or a list of them.
+	 * Rules with sibling combinators, pseudo-classes, attribute selectors or inside at-rules are left out.
 	 * @param string $svgdata SVG document
 	 * @return array rules in cascade order: by specificity, then by order in the document
 	 * @protected
@@ -24115,31 +24122,13 @@ class TCPDF {
 					continue;
 				}
 				foreach (explode(',', $block[1]) as $selector) {
-					$selector = trim($selector);
-					$parts = array();
-					if (($selector === '') OR !preg_match('/^(\*|[a-zA-Z][a-zA-Z0-9_\-]*)?((?:[\.\#][a-zA-Z0-9_\-]+)*)$/', $selector, $parts)) {
+					$parsed = $this->getSVGSelector($selector);
+					if ($parsed === null) {
 						continue;
 					}
-					$type = isset($parts[1]) ? $parts[1] : '';
-					$ids = array();
-					$classes = array();
-					$names = array();
-					preg_match_all('/([\.\#])([a-zA-Z0-9_\-]+)/', isset($parts[2]) ? $parts[2] : '', $names, PREG_SET_ORDER);
-					foreach ($names as $name) {
-						if ($name[1] == '#') {
-							$ids[] = $name[2];
-						} else {
-							$classes[] = $name[2];
-						}
-					}
-					$rules[] = array(
-						'type' => $type,
-						'ids' => $ids,
-						'classes' => $classes,
-						'specificity' => array(count($ids), count($classes), ((($type !== '') AND ($type !== '*')) ? 1 : 0)),
-						'order' => $order++,
-						'declarations' => $declarations
-					);
+					$parsed['order'] = $order++;
+					$parsed['declarations'] = $declarations;
+					$rules[] = $parsed;
 				}
 			}
 		}
@@ -24148,6 +24137,112 @@ class TCPDF {
 			return ($cmp !== 0) ? $cmp : ($a['order'] <=> $b['order']);
 		});
 		return $rules;
+	}
+
+	/**
+	 * A CSS selector made of compound selectors (a type or the universal selector, classes, ids) joined by
+	 * descendant or child combinators.
+	 * @param string $selector selector
+	 * @return array|null 'compounds', the 'combinators' between them and the 'specificity'; null when the
+	 * selector uses anything else
+	 * @protected
+	 */
+	protected function getSVGSelector($selector) {
+		$selector = trim(preg_replace('/[\s]*>[\s]*/', ' > ', trim($selector)));
+		if ($selector === '') {
+			return null;
+		}
+		$compounds = array();
+		$combinators = array();
+		$combinator = ' ';
+		$specificity = array(0, 0, 0);
+		foreach (preg_split('/[\s]+/', $selector) as $token) {
+			if ($token === '>') {
+				if (empty($compounds) OR ($combinator === '>')) {
+					return null;
+				}
+				$combinator = '>';
+				continue;
+			}
+			$parts = array();
+			if (!preg_match('/^(\*|[a-zA-Z][a-zA-Z0-9_\-]*)?((?:[\.\#][a-zA-Z0-9_\-]+)*)$/', $token, $parts) OR ($token === '')) {
+				return null;
+			}
+			$compound = array('type' => isset($parts[1]) ? $parts[1] : '', 'ids' => array(), 'classes' => array());
+			$names = array();
+			preg_match_all('/([\.\#])([a-zA-Z0-9_\-]+)/', isset($parts[2]) ? $parts[2] : '', $names, PREG_SET_ORDER);
+			foreach ($names as $name) {
+				if ($name[1] == '#') {
+					$compound['ids'][] = $name[2];
+				} else {
+					$compound['classes'][] = $name[2];
+				}
+			}
+			$specificity[0] += count($compound['ids']);
+			$specificity[1] += count($compound['classes']);
+			$specificity[2] += (($compound['type'] !== '') AND ($compound['type'] !== '*')) ? 1 : 0;
+			if (!empty($compounds)) {
+				$combinators[] = $combinator;
+			}
+			$compounds[] = $compound;
+			$combinator = ' ';
+		}
+		if ($combinator === '>') {
+			return null;
+		}
+		return array('compounds' => $compounds, 'combinators' => $combinators, 'specificity' => $specificity);
+	}
+
+	/**
+	 * What a CSS selector can see of an SVG element: its name, id and classes.
+	 * @param string $name element name
+	 * @param array $attribs element attributes
+	 * @return array
+	 * @protected
+	 */
+	protected function getSVGSelectorSubject($name, $attribs) {
+		return array(
+			'type' => $name,
+			'id' => isset($attribs['id']) ? $attribs['id'] : '',
+			'classes' => isset($attribs['class']) ? preg_split('/[\s]+/', trim($attribs['class'])) : array()
+		);
+	}
+
+	/**
+	 * Whether a compound selector matches an element.
+	 * @param array $compound compound selector
+	 * @param array $subject element, as getSVGSelectorSubject() describes it
+	 * @return bool
+	 * @protected
+	 */
+	protected function matchesSVGCompound($compound, $subject) {
+		return (($compound['type'] === '') OR ($compound['type'] === '*') OR ($compound['type'] === $subject['type']))
+			AND (empty($compound['ids']) OR (array_unique($compound['ids']) === array($subject['id'])))
+			AND (count(array_diff($compound['classes'], $subject['classes'])) == 0);
+	}
+
+	/**
+	 * Whether the compound selectors up to $index match the ancestors up to $from, each joined to the one
+	 * after it by its combinator.
+	 * @param array $rule selector, as getSVGSelector() returns it
+	 * @param int $index compound selector to match
+	 * @param int $from nearest ancestor it may match
+	 * @return bool
+	 * @protected
+	 */
+	protected function matchesSVGAncestors($rule, $index, $from) {
+		if ($index < 0) {
+			return true;
+		}
+		for ($i = $from; $i >= 0; --$i) {
+			if ($this->matchesSVGCompound($rule['compounds'][$index], $this->svgancestors[$i]) AND $this->matchesSVGAncestors($rule, ($index - 1), ($i - 1))) {
+				return true;
+			}
+			if ($rule['combinators'][$index] === '>') {
+				return false;
+			}
+		}
+		return false;
 	}
 
 	/**
@@ -24216,12 +24311,10 @@ class TCPDF {
 		$inline = isset($attribs['style']) ? $this->getSVGStyleDeclarations($attribs['style']) : array('normal' => array(), 'important' => array());
 		$matched = array();
 		if (!empty($this->svgcssrules)) {
-			$id = isset($attribs['id']) ? $attribs['id'] : '';
-			$classes = isset($attribs['class']) ? preg_split('/[\s]+/', trim($attribs['class'])) : array();
+			$subject = $this->getSVGSelectorSubject($name, $attribs);
 			foreach ($this->svgcssrules as $rule) {
-				if ((($rule['type'] === '') OR ($rule['type'] === '*') OR ($rule['type'] === $name))
-					AND (empty($rule['ids']) OR (array_unique($rule['ids']) === array($id)))
-					AND (count(array_diff($rule['classes'], $classes)) == 0)) {
+				$last = count($rule['compounds']) - 1;
+				if ($this->matchesSVGCompound($rule['compounds'][$last], $subject) AND $this->matchesSVGAncestors($rule, ($last - 1), (count($this->svgancestors) - 1))) {
 					$matched[] = $rule;
 				}
 			}
@@ -24968,6 +25061,11 @@ class TCPDF {
 			// SVG 2 references without the xlink namespace
 			$attribs['xlink:href'] = $attribs['href'];
 		}
+		if (!is_string($parser)) {
+			// style rules match where the element is written, also when it is kept as a definition, clip path or pattern tile
+			$attribs = $this->applySVGStyleRules($name, $attribs);
+			$this->svgancestors[] = $this->getSVGSelectorSubject($name, $attribs);
+		}
 		// record the content of a pattern, drawn as its tile wherever it fills a shape
 		if (!empty($this->svgpatternrecord)) {
 			if ($name == 'pattern') {
@@ -25004,10 +25102,6 @@ class TCPDF {
 				}
 			}
 			return;
-		}
-		if ($name != 'use') {
-			// a used element takes the rules that match it, not the ones of the use element
-			$attribs = $this->applySVGStyleRules($name, $attribs);
 		}
 		$clipping = false;
 		if ($parser == 'clip-path') {
@@ -25543,6 +25637,7 @@ class TCPDF {
 						$svgcssrules = $this->svgcssrules;
 						$svgstyles = $this->svgstyles;
 						$svg_tag_depth = $this->svg_tag_depth;
+						$svgancestors = $this->svgancestors;
 						$this->ImageSVG($img, $x, $y, $w, $h);
 						// restore SVG vars
 						$this->svggradients = $svggradients;
@@ -25561,6 +25656,7 @@ class TCPDF {
 						$this->svgcssrules = $svgcssrules;
 						$this->svgstyles = $svgstyles;
 						$this->svg_tag_depth = $svg_tag_depth;
+						$this->svgancestors = $svgancestors;
 					} else {
 						$this->Image($img, $x, $y, $w, $h);
 					}
@@ -25657,19 +25753,16 @@ class TCPDF {
 						if (trim($transform) !== '') {
 							$attribs['transform'] = trim($transform);
 						}
-						// merge styles: the used element's own properties win over the ones of the use element
-						$use_style = $this->getSVGStyleDeclarations(isset($attribs['style']) ? $attribs['style'] : '');
-						$attribs['style'] = '';
-						foreach (array_merge($use_style['normal'], $use_style['important']) as $property => $value) {
-							if (!isset($use['attribs'][$property])) {
-								$attribs['style'] .= ';'.$property.':'.$value;
+						// the used element keeps its own properties, its style rules already applied where it is
+						// defined; the use element's, its rules and style attribute applied, fill in the rest
+						unset($attribs['class'], $attribs['style']);
+						foreach (array_keys($attribs) as $property) {
+							if (array_key_exists($property, $this->svgstyles[0]) AND isset($use['attribs'][$property])) {
+								unset($attribs[$property]);
 							}
 						}
-						if (!empty($use['attribs']['style'])) {
-							$attribs['style'] .= ';'.$use['attribs']['style'];
-						}
 						$attribs = array_merge($use['attribs'], $attribs);
-						$this->startSVGElementHandler($parser, $use['name'], $attribs);
+						$this->startSVGElementHandler('use', $use['name'], $attribs);
 						return;
 					}
 				}
@@ -25706,6 +25799,9 @@ class TCPDF {
 	 */
 	protected function endSVGElementHandler($parser, $name) {
 		$name = $this->removeTagNamespace($name);
+		if (!is_string($parser)) {
+			array_pop($this->svgancestors);
+		}
 		if (!empty($this->svgpatternrecord)) {
 			if ($name == 'pattern') {
 				if ($this->svgpatternrecord['depth'] == 0) {

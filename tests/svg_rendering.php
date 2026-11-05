@@ -317,9 +317,38 @@ check('an id rule beats a class rule', near(pixel($image, 25, 25), GREEN));
 $image = render(svg('<style>.g{fill:#0000ff}</style><g class="g"><rect width="50" height="50"/></g>'));
 check('a rule on a group is inherited', near(pixel($image, 25, 25), BLUE));
 
-$image = render(svg('<style>g rect{fill:#00ff00} rect:hover{fill:#ff0000} @media print { rect{fill:#ff0000} }</style>'
-    . '<rect width="50" height="50" fill="#0000ff"/>'));
-check('rules a simple selector cannot express are ignored', near(pixel($image, 25, 25), BLUE));
+$image = render(svg('<style>rect:hover{fill:#ff0000} rect[x]{fill:#ff0000} g + rect{fill:#ff0000} @media print { rect{fill:#ff0000} }</style>'
+    . '<g/><rect x="0" width="50" height="50" fill="#0000ff"/>'));
+check('rules with a pseudo-class, an attribute selector, a sibling combinator or inside an at-rule are ignored', near(pixel($image, 25, 25), BLUE));
+
+$image = render(svg('<style>g circle{fill:#000000} .warm{fill:#ff0000}</style>'
+    . '<g class="warm"><circle cx="25" cy="25" r="20"/></g><circle cx="75" cy="75" r="20" class="warm"/>'));
+check('a descendant rule beats a property inherited from the group', near(pixel($image, 25, 25), BLACK));
+check('a descendant rule applies only inside its ancestor', near(pixel($image, 75, 75), RED));
+
+$image = render(svg('<style>.outer > rect{fill:#0000ff} .outer rect{fill:#00ff00}</style>'
+    . '<g class="outer"><rect width="40" height="40"/><g><rect x="50" y="50" width="40" height="40"/></g></g>'));
+check('of a child and a descendant rule equally specific, the later wins', near(pixel($image, 20, 20), GREEN));
+check('a descendant rule reaches through several levels', near(pixel($image, 70, 70), GREEN));
+
+$image = render(svg('<style>.outer rect{fill:#00ff00} .outer > rect{fill:#0000ff} svg g.a.b > rect#x{fill:#ff0000}</style>'
+    . '<g class="outer"><rect width="40" height="40"/><g><rect x="50" y="50" width="40" height="40"/></g></g>'
+    . '<g class="a b"><rect id="x" x="50" width="40" height="40"/></g>'));
+check('a child rule applies only to a direct child', near(pixel($image, 20, 20), BLUE) && near(pixel($image, 70, 70), GREEN));
+check('a combinator selector with compound parts matches', near(pixel($image, 70, 20), RED));
+
+$image = render(svg('<style>.outer rect{fill:#0000ff} #i{fill:#00ff00} rect{fill:#ff0000}</style>'
+    . '<g class="outer"><rect width="40" height="40"/><rect id="i" x="50" width="40" height="40"/></g>'));
+check('specificity counts every part of a combined selector', near(pixel($image, 20, 20), BLUE) && near(pixel($image, 70, 20), GREEN));
+
+$image = render(svg('<style>.icons rect{fill:#0000ff}</style><defs><g class="icons"><rect id="r" width="20" height="20"/></g></defs>'
+    . '<use href="#r" x="50" y="50"/>'));
+check('a used element keeps the rules that match it where it is defined', near(pixel($image, 60, 60), BLUE));
+
+$image = render(svg('<defs><rect id="own" width="20" height="20" fill="#0000ff"/><rect id="bare" width="20" height="20"/></defs>'
+    . '<use href="#own" fill="#ff0000"/><use href="#bare" x="50" y="50" fill="#00ff00"/>'));
+check('a used element keeps its own fill over the use element\'s', near(pixel($image, 10, 10), BLUE));
+check('a used element takes the use element\'s fill where it has none', near(pixel($image, 60, 60), GREEN));
 
 $image = render(svg('<style>.s{fill:none;stroke:#0000ff;stroke-width:10}</style><rect class="s" x="20" y="20" width="60" height="60"/>'));
 check('a rule can set the stroke', near(pixel($image, 20, 50), BLUE) && near(pixel($image, 50, 50), WHITE));
