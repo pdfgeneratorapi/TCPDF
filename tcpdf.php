@@ -25055,6 +25055,8 @@ class TCPDF {
 			// the current graphics element is invisible (nothing is painted)
 			$invisible = true;
 		}
+		$clip_operator = ($svgstyle['clip-rule'] == 'evenodd') ? 'CEO' : 'CNZ';
+		$fill_clip_operator = ($svgstyle['fill-rule'] == 'evenodd') ? 'CEO' : 'CNZ';
 		// process tag
 		switch($name) {
 			case 'defs': {
@@ -25285,12 +25287,12 @@ class TCPDF {
 						$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array($w, 0, 0, $h, $x, $y));
 						if ($clipping) {
 							$this->SVGTransform($tm);
-							$this->SVGPath($d, 'CNZ');
+							$this->SVGPath($d, $clip_operator);
 							$this->SVGTransformInverse($tm);
 						} else {
 							$this->StartTransform();
 							$this->SVGTransform($tm);
-							$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'SVGPath', array($d, 'CNZ'));
+							$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'SVGPath', array($d, $fill_clip_operator));
 							if (!empty($obstyle)) {
 								$this->SVGPath($d, $obstyle);
 							}
@@ -25313,7 +25315,7 @@ class TCPDF {
 				$ry = (isset($attribs['ry'])?$this->getHTMLUnitToUnits($attribs['ry'], 0, $this->svgunit, false):$rx);
 				if ($clipping) {
 					$this->SVGTransform($tm);
-					$this->RoundedRectXY($x, $y, $w, $h, $rx, $ry, '1111', 'CNZ', array(), array());
+					$this->RoundedRectXY($x, $y, $w, $h, $rx, $ry, '1111', $clip_operator, array(), array());
 					$this->SVGTransformInverse($tm);
 				} else {
 					$this->StartTransform();
@@ -25339,7 +25341,7 @@ class TCPDF {
 				$h = $w;
 				if ($clipping) {
 					$this->SVGTransform($tm);
-					$this->Circle($cx, $cy, $r, 0, 360, 'CNZ', array(), array(), 8);
+					$this->Circle($cx, $cy, $r, 0, 360, $clip_operator, array(), array(), 8);
 					$this->SVGTransformInverse($tm);
 				} else {
 					$this->StartTransform();
@@ -25367,7 +25369,7 @@ class TCPDF {
 				$h = (2 * $ry);
 				if ($clipping) {
 					$this->SVGTransform($tm);
-					$this->Ellipse($cx, $cy, $rx, $ry, 0, 0, 360, 'CNZ', array(), array(), 8);
+					$this->Ellipse($cx, $cy, $rx, $ry, 0, 0, 360, $clip_operator, array(), array(), 8);
 					$this->SVGTransformInverse($tm);
 				} else {
 					$this->StartTransform();
@@ -25437,7 +25439,7 @@ class TCPDF {
 				if ($name == 'polyline') {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
-					$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'PolyLine', array($p, 'CNZ'));
+					$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'PolyLine', array($p, $fill_clip_operator));
 					if (!empty($obstyle)) {
 						$this->PolyLine($p, $obstyle, array(), array());
 					}
@@ -25445,12 +25447,12 @@ class TCPDF {
 				} else { // polygon
 					if ($clipping) {
 						$this->SVGTransform($tm);
-						$this->Polygon($p, 'CNZ', array(), array(), true);
+						$this->Polygon($p, $clip_operator, array(), array(), true);
 						$this->SVGTransformInverse($tm);
 					} else {
 						$this->StartTransform();
 						$this->SVGTransform($tm);
-						$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'Polygon', array($p, 'CNZ'));
+						$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'Polygon', array($p, $fill_clip_operator));
 						if (!empty($obstyle)) {
 							$this->Polygon($p, $obstyle, array(), array(), true);
 						}

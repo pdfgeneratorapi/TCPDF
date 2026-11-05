@@ -169,6 +169,14 @@ $image = render(svg('<defs><clipPath id="c" transform="' . $flip . '"><rect widt
     . '<rect clip-path="url(#c)" width="100" height="100" fill="red"/>'));
 check('a clipPath element\'s own transform moves only the clip', near(pixel($image, 50, 80), RED) && near(pixel($image, 50, 20), WHITE));
 
+$image = render(svg('<defs><clipPath id="ring"><path transform="' . $flip . '" d="M20 20H80V80H20ZM35 35H65V65H35Z" clip-rule="evenodd"/></clipPath></defs>'
+    . '<rect clip-path="url(#ring)" width="100" height="100" fill="red"/>'));
+check('an even-odd clip path keeps its hole', near(pixel($image, 25, 50), RED) && near(pixel($image, 50, 50), WHITE));
+
+$image = render(svg('<defs><clipPath id="ring"><path d="M20 20H80V80H20ZM35 35H65V65H35Z"/></clipPath></defs>'
+    . '<rect clip-path="url(#ring)" width="100" height="100" fill="red"/>'));
+check('a nonzero clip path fills its inner square drawn the same way round', near(pixel($image, 50, 50), RED));
+
 // --- linear gradients ------------------------------------------------------------------
 
 $image = render(svg('<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff0000"/>'
@@ -195,6 +203,10 @@ $middle = pixel($image, 50, 40);
 check('a vertical gradient off the middle of the shape starts and ends where it says',
     near(pixel($image, 50, 10), RED, 30) && near(pixel($image, 50, 80), BLUE, 30)
     && $middle !== null && abs($middle[0] - $middle[2]) < 50);
+
+$image = render(svg('<defs><linearGradient id="g"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#ff0000"/></linearGradient></defs>'
+    . '<path d="M20 20H80V80H20ZM35 35H65V65H35Z" fill-rule="evenodd" fill="url(#g)"/>'));
+check('a gradient fill keeps the hole of an even-odd shape', near(pixel($image, 25, 50), RED) && near(pixel($image, 50, 50), WHITE));
 
 // --- patterns --------------------------------------------------------------------------
 
