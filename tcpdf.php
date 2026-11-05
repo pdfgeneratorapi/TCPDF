@@ -23406,6 +23406,8 @@ class TCPDF {
 		$this->svgpatternrecord = array();
 		$this->svgpatternstack = array();
 		$this->svgcssrules = array();
+		$this->svgstyles = array($this->svgstyles[0]);
+		$this->svg_tag_depth = 0;
 		if ($this->rasterize_vector_images AND ($w > 0) AND ($h > 0)) {
 			// convert SVG to raster image using GD or ImageMagick libraries
 			return $this->Image($file, $x, $y, $w, $h, 'SVG', $link, $align, true, 300, $palign, false, false, $border, false, false, false);
@@ -25087,6 +25089,8 @@ class TCPDF {
 			case 'svg': {
 				// start of SVG object
 				if(++$this->svg_tag_depth <= 1) {
+					// the root element's properties are inherited like a group's
+					array_push($this->svgstyles, $svgstyle);
 					break;
 				}
 				// inner SVG
@@ -25537,6 +25541,8 @@ class TCPDF {
 						$svgpatternrecord = $this->svgpatternrecord;
 						$svgpatternstack = $this->svgpatternstack;
 						$svgcssrules = $this->svgcssrules;
+						$svgstyles = $this->svgstyles;
+						$svg_tag_depth = $this->svg_tag_depth;
 						$this->ImageSVG($img, $x, $y, $w, $h);
 						// restore SVG vars
 						$this->svggradients = $svggradients;
@@ -25553,6 +25559,8 @@ class TCPDF {
 						$this->svgpatternrecord = $svgpatternrecord;
 						$this->svgpatternstack = $svgpatternstack;
 						$this->svgcssrules = $svgcssrules;
+						$this->svgstyles = $svgstyles;
+						$this->svg_tag_depth = $svg_tag_depth;
 					} else {
 						$this->Image($img, $x, $y, $w, $h);
 					}
@@ -25634,17 +25642,20 @@ class TCPDF {
 					$svgdefid = substr($attribs['xlink:href'], 1);
 					if (isset($this->svgdefs[$svgdefid])) {
 						$use = $this->svgdefs[$svgdefid];
-						if (isset($attribs['xlink:href'])) {
-							unset($attribs['xlink:href']);
+						unset($attribs['xlink:href'], $attribs['href'], $attribs['id']);
+						// the use element's transform, then its x and y, then the element's own transform
+						$transform = isset($attribs['transform']) ? $attribs['transform'] : '';
+						$use_x = isset($attribs['x']) ? floatval($attribs['x']) : 0;
+						$use_y = isset($attribs['y']) ? floatval($attribs['y']) : 0;
+						if (($use_x != 0) OR ($use_y != 0)) {
+							$transform .= ' translate('.$use_x.','.$use_y.')';
 						}
-						if (isset($attribs['id'])) {
-							unset($attribs['id']);
+						if (!empty($use['attribs']['transform'])) {
+							$transform .= ' '.$use['attribs']['transform'];
 						}
-						if (isset($use['attribs']['x']) AND isset($attribs['x'])) {
-							$attribs['x'] += $use['attribs']['x'];
-						}
-						if (isset($use['attribs']['y']) AND isset($attribs['y'])) {
-							$attribs['y'] += $use['attribs']['y'];
+						unset($attribs['x'], $attribs['y'], $attribs['transform']);
+						if (trim($transform) !== '') {
+							$attribs['transform'] = trim($transform);
 						}
 						// merge styles: the used element's own properties win over the ones of the use element
 						$use_style = $this->getSVGStyleDeclarations(isset($attribs['style']) ? $attribs['style'] : '');
@@ -25736,6 +25747,7 @@ class TCPDF {
 			}
 			case 'svg': {
 				if (--$this->svg_tag_depth <= 0) {
+					array_pop($this->svgstyles);
 					break;
 				}
 			}

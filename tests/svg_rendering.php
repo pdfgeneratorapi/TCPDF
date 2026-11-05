@@ -339,5 +339,23 @@ $image = render(svg('<defs><linearGradient id="base"><stop offset="0" stop-color
     . '<linearGradient id="g" href="#base"/></defs><rect width="100" height="100" fill="url(#g)"/>'));
 check('a gradient takes its stops from an href without the xlink prefix', near(pixel($image, 50, 50), GREEN));
 
+// --- use and inheritance from the root -------------------------------------------------
+
+$image = render(svg('<defs><polygon id="t" points="0,0 20,0 20,20 0,20" fill="#0000ff"/></defs><use href="#t" x="50" y="50"/>'));
+check('use x and y move an element that has no x and y of its own', near(pixel($image, 60, 60), BLUE) && near(pixel($image, 10, 10), WHITE));
+
+$image = render(svg('<defs><rect id="r" width="20" height="20" transform="translate(10,0)" fill="#0000ff"/></defs>'
+    . '<use href="#r" x="50" y="50" transform="translate(-20,-20)"/>'));
+check('use applies its transform, then x and y, then the element\'s own transform', near(pixel($image, 50, 40), BLUE) && near(pixel($image, 35, 40), WHITE)
+    && near(pixel($image, 70, 60), WHITE));
+
+$image = render('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="#0000ff" stroke-width="10" color="#00ff00">'
+    . '<rect x="10" y="10" width="40" height="40"/><circle cx="75" cy="75" r="15" fill="currentColor" stroke="none"/></svg>');
+check('presentation attributes on the root svg are inherited', near(pixel($image, 10, 30), BLUE) && near(pixel($image, 30, 30), WHITE)
+    && near(pixel($image, 75, 75), GREEN));
+
+$image = render(svg('<rect x="10" y="10" width="20" height="20" fill="#ff0000"/>'));
+check('an SVG drawn after one with root attributes does not inherit them', near(pixel($image, 20, 20), RED));
+
 echo PHP_EOL . ($failures === 0 ? 'All checks passed' : $failures . ' check(s) failed') . PHP_EOL;
 exit($failures === 0 ? 0 : 1);
