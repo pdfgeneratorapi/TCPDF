@@ -23440,37 +23440,29 @@ class TCPDF {
 		// get original image width and height
 		preg_match('/<svg([^\>]*)>/si', $svgdata, $regs);
 		if (isset($regs[1]) AND !empty($regs[1])) {
-			$tmp = array();
-			if (preg_match('/[\s]+x[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$ox = $this->getHTMLUnitToUnits($tmp[1], 0, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'x')) !== null) {
+				$ox = $this->getHTMLUnitToUnits($value, 0, $this->svgunit, false);
 			}
-			$tmp = array();
-			if (preg_match('/[\s]+y[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$oy = $this->getHTMLUnitToUnits($tmp[1], 0, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'y')) !== null) {
+				$oy = $this->getHTMLUnitToUnits($value, 0, $this->svgunit, false);
 			}
-			$tmp = array();
-			if (preg_match('/[\s]+width[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$ow = $this->getHTMLUnitToUnits($tmp[1], 1, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'width')) !== null) {
+				$ow = $this->getHTMLUnitToUnits($value, 1, $this->svgunit, false);
 			}
-			$tmp = array();
-			if (preg_match('/[\s]+height[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$oh = $this->getHTMLUnitToUnits($tmp[1], 1, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'height')) !== null) {
+				$oh = $this->getHTMLUnitToUnits($value, 1, $this->svgunit, false);
 			}
-			$tmp = array();
 			$view_box = array();
-			if (preg_match('/[\s]+viewBox[\s]*=[\s]*"[\s]*([0-9\.\-]+)[\s]+([0-9\.\-]+)[\s]+([0-9\.]+)[\s]+([0-9\.]+)[\s]*"/si', $regs[1], $tmp)) {
-				if (count($tmp) == 5) {
-					array_shift($tmp);
-					foreach ($tmp as $key => $val) {
-						$view_box[$key] = $this->getHTMLUnitToUnits($val, 0, $this->svgunit, false);
-					}
-					$ox = $view_box[0];
-					$oy = $view_box[1];
+			$tmp = preg_split('/[\s,]+/', trim((string) $this->getSVGRootAttribute($regs[1], 'viewBox')));
+			if ((count($tmp) == 4) AND is_numeric($tmp[0]) AND is_numeric($tmp[1]) AND is_numeric($tmp[2]) AND is_numeric($tmp[3]) AND ($tmp[2] >= 0) AND ($tmp[3] >= 0)) {
+				foreach ($tmp as $key => $val) {
+					$view_box[$key] = $this->getHTMLUnitToUnits($val, 0, $this->svgunit, false);
 				}
+				$ox = $view_box[0];
+				$oy = $view_box[1];
 				// get aspect ratio
-				$tmp = array();
-				if (preg_match('/[\s]+preserveAspectRatio[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-					$aspect_ratio = preg_split('/[\s]+/si', $tmp[1]);
+				if (($value = $this->getSVGRootAttribute($regs[1], 'preserveAspectRatio')) !== null) {
+					$aspect_ratio = preg_split('/[\s]+/si', trim($value));
 					switch (count($aspect_ratio)) {
 						case 3: {
 							$aspect_ratio_align = $aspect_ratio[1];
@@ -23740,6 +23732,21 @@ class TCPDF {
 	 */
 	protected function SVGTransform($tm) {
 		$this->Transform($this->convertSVGtMatrix($tm));
+	}
+
+	/**
+	 * An attribute of the root svg element, quoted with double or single quotes.
+	 * @param string $tag attributes of the root svg element
+	 * @param string $name attribute name
+	 * @return string|null null when the attribute is missing
+	 * @protected
+	 */
+	protected function getSVGRootAttribute($tag, $name) {
+		$regs = array();
+		if (preg_match('/[\s]+'.preg_quote($name, '/').'[\s]*=[\s]*(["\'])(.*?)\1/si', $tag, $regs)) {
+			return $regs[2];
+		}
+		return null;
 	}
 
 	/**

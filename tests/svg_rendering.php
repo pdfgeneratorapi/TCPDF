@@ -136,6 +136,23 @@ if ($probe === null) {
     exit(1);
 }
 
+// --- the root element ------------------------------------------------------------------
+
+foreach (array('"' => 'double', "'" => 'single') as $quote => $name) {
+    $pdf = createPdf();
+    $pdf->ImageSVG('@<svg xmlns=' . $quote . 'http://www.w3.org/2000/svg' . $quote . ' viewBox=' . $quote . '0 0 100 100' . $quote . '>'
+        . '<rect width="100" height="100" fill="red"/></svg>', 0, 0, 100, 50);
+    $image = rasterize($pdf);
+    check('a viewBox in ' . $name . ' quotes fits the box, centred', near(pixel($image, 50, 25), RED) && near(pixel($image, 10, 25), WHITE)
+        && near(pixel($image, 90, 25), WHITE) && near(pixel($image, 50, 75), WHITE));
+}
+
+$pdf = createPdf();
+$pdf->ImageSVG("@<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100' viewBox='0,0,200,100' preserveAspectRatio='xMinYMin meet'>"
+    . '<rect width="200" height="100" fill="red"/></svg>', 0, 0, 100, 100);
+$image = rasterize($pdf);
+check('single-quoted size, a comma-separated viewBox and preserveAspectRatio are read', near(pixel($image, 50, 25), RED) && near(pixel($image, 50, 75), WHITE));
+
 // --- clip paths ------------------------------------------------------------------------
 
 $flip = 'matrix(1,0,0,-1,0,100)';
