@@ -1,7 +1,7 @@
 <?php
 //============================================================+
 // File name   : tcpdf.php
-// Version     : 6.11.3.2
+// Version     : 6.11.3.3
 // Begin       : 2002-08-03
 // Last Update : 2026-03-03
 // Author      : Nicola Asuni - Tecnick.com LTD - www.tecnick.com - info@tecnick.com
@@ -104,7 +104,7 @@
  * Tools to encode your unicode fonts are on fonts/utils directory.</p>
  * @package com.tecnick.tcpdf
  * @author Nicola Asuni
- * @version 6.11.3.2
+ * @version 6.11.3.3
  */
 
 // TCPDF configuration
@@ -128,7 +128,7 @@ require_once(dirname(__FILE__).'/include/tcpdf_static.php');
  * TCPDF project (http://www.tcpdf.org) has been originally derived in 2002 from the Public Domain FPDF class by Olivier Plathey (http://www.fpdf.org), but now is almost entirely rewritten.<br>
  * @package com.tecnick.tcpdf
  * @brief PHP class for generating PDF documents without requiring external extensions.
- * @version 6.11.3.2
+ * @version 6.11.3.3
  * @author Nicola Asuni - info@tecnick.com
  * @IgnoreAnnotation("protected")
  * @IgnoreAnnotation("public")
@@ -25970,12 +25970,21 @@ class TCPDF {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
 					$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h);
-					if (preg_match('/^data:image\/[^;]+;base64,/', $img, $m) > 0) {
-						// embedded image encoded as base64
-						$img = '@'.base64_decode(substr($img, strlen($m[0])));
+					$imgtype = '';
+					$m = array();
+					if (preg_match('/^data:image\/([^;,]+)((?:;[^;,]*)*),/i', $img, $m) > 0) {
+						// embedded image, base64 or percent-encoded, of the type its media type says
+						$payload = substr($img, strlen($m[0]));
+						if (strtolower(substr($m[2], -7)) == ';base64') {
+							$img = '@'.base64_decode((strpos($payload, '%') !== false) ? rawurldecode($payload) : $payload);
+						} else {
+							$img = '@'.rawurldecode($payload);
+						}
+						$imgtype = (strtolower($m[1]) == 'svg+xml') ? 'svg' : strtolower($m[1]);
 					} else {
 						// fix image path
 						if ($this->isRelativePath($img) || $this->hasExtForbiddenProtocol($img)) {
+							$this->StopTransform();
 							break;
 						}
 						if (!TCPDF_STATIC::empty_string($this->svgdir) AND (($img[0] == '.') OR (basename($img) == $img))) {
@@ -26003,7 +26012,9 @@ class TCPDF {
 						}
 					}
 					// get image type
-					$imgtype = TCPDF_IMAGES::getImageFileType($img);
+					if ($imgtype === '') {
+						$imgtype = TCPDF_IMAGES::getImageFileType($img);
+					}
 					if (($imgtype == 'eps') OR ($imgtype == 'ai')) {
 						$this->ImageEps($img, $x, $y, $w, $h);
 					} elseif ($imgtype == 'svg') {
