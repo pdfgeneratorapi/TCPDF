@@ -245,6 +245,7 @@ ${PHP_BINARY} -n \
     -d date.timezone=UTC \
     ${BCMATH_EXT} \
     ${CURL_EXT} \
+    ${JSON_EXT} \
     ${XML_EXT} \
     -d display_errors=on \
     -d error_reporting=-1 \
