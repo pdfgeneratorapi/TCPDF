@@ -636,5 +636,29 @@ for ($x = 0; ($x < 100) && ($text_left === null); ++$x) {
 }
 check('text x in percentages is a share of the viewport width', ($text_left !== null) && ($text_left >= 50) && ($text_left < 60));
 
+// --- images ----------------------------------------------------------------------------
+
+$inner = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#0000ff"/></svg>';
+$data_uris = array(
+    'base64' => 'data:image/svg+xml;base64,' . base64_encode($inner),
+    'base64 after a charset' => 'data:image/svg+xml;charset=utf-8;base64,' . base64_encode($inner),
+    'percent-encoded text' => 'data:image/svg+xml,' . rawurlencode($inner),
+);
+foreach ($data_uris as $name => $uri) {
+    $image = render(svg('<style>.after{fill:#00ff00}</style>'
+        . '<image x="10" y="10" width="40" height="40" href="' . htmlspecialchars($uri, ENT_QUOTES) . '"/>'
+        . '<rect class="after" x="60" y="60" width="30" height="30"/>'), $content);
+    check('an SVG data URI in an image (' . $name . ') is drawn as vectors', near(pixel($image, 30, 30), BLUE) && !preg_match('/\/I\d+ Do/', $content));
+    check('the SVG around an SVG data URI image (' . $name . ') keeps its style rules after it', near(pixel($image, 75, 75), GREEN));
+    check('an SVG data URI image (' . $name . ') leaves q and Q balanced', balanced($content));
+}
+
+$png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+render(svg('<image x="10" y="10" width="40" height="40" href="data:image/png;base64,' . $png . '"/>'), $content);
+check('a PNG data URI in an image is still drawn as an image', preg_match('/\/I\d+ Do/', $content) === 1 && balanced($content));
+
+$image = render(svg('<image x="10" y="10" width="40" height="40" href="../outside.png"/><rect x="60" y="60" width="30" height="30" fill="#0000ff"/>'), $content);
+check('an image whose path leaves its folder is not drawn and leaves q and Q balanced', balanced($content) && near(pixel($image, 75, 75), BLUE));
+
 echo PHP_EOL . ($failures === 0 ? 'All checks passed' : $failures . ' check(s) failed') . PHP_EOL;
 exit($failures === 0 ? 0 : 1);
