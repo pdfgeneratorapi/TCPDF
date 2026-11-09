@@ -241,6 +241,25 @@ check('an empty clip path does not hide what follows', near(pixel($image, 75, 75
 $image = render(svg('<rect clip-path="url(#missing)" width="100" height="100" fill="red"/>'));
 check('a clip-path referencing nothing leaves the element unclipped', near(pixel($image, 50, 50), RED));
 
+$grouped = '<clipPath id="c"><g><rect width="50" height="100"/></g><rect width="100" height="30"/></clipPath>';
+$after = '<rect clip-path="url(#c)" width="100" height="100" fill="red"/><rect x="60" y="60" width="30" height="30" fill="#0000ff"/>';
+
+$image = render(svg($grouped . $after), $content);
+check('a group inside a clip path adds nothing to it', near(pixel($image, 75, 15), RED) && near(pixel($image, 25, 50), WHITE));
+check('a group inside a clip path leaves q and Q balanced', balanced($content));
+check('what follows a clip path with a group inside is drawn unclipped', near(pixel($image, 75, 75), BLUE));
+
+$image = render(svg('<defs><g id="a"><rect width="20" height="20" fill="#00ff00"/></g>' . $grouped . '</defs><use href="#a" x="70" y="35"/>' . $after), $content);
+check('a group inside a clip path in defs leaves the definitions before it whole', near(pixel($image, 80, 45), GREEN) && balanced($content));
+
+$letter = '<text x="10" y="90" font-size="100" font-weight="bold">I</text>';
+foreach (array('inside defs' => '<defs><clipPath id="t">' . $letter . '</clipPath></defs>', 'outside defs' => '<clipPath id="t">' . $letter . '</clipPath>') as $where => $clip) {
+    $image = render(svg($clip . '<rect clip-path="url(#t)" width="100" height="100" fill="#0000ff"/>'), $content);
+    check('text in a clip path ' . $where . ' clips with its glyphs and is not drawn', paintedOnlyIn($image, BLUE)
+        && near(pixel($image, 80, 50), WHITE) && near(pixel($image, 5, 5), WHITE));
+    check('text in a clip path ' . $where . ' leaves q and Q balanced', balanced($content));
+}
+
 // --- linear gradients ------------------------------------------------------------------
 
 $image = render(svg('<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff0000"/>'
@@ -560,6 +579,18 @@ $image = render(svg('<g opacity="0.5"><g opacity="0.5"><rect width="50" height="
     . '<svg x="50" y="50" width="50" height="50" opacity="0.5"><rect width="50" height="50" fill="#0000ff" opacity="0.5"/></svg>'));
 check('nested groups multiply their opacities', near(pixel($image, 25, 25), QUARTER_BLUE, 20));
 check('opacity on a nested svg multiplies the opacity inside it', near(pixel($image, 75, 75), QUARTER_BLUE, 20));
+
+$image = render(svg('<rect width="50" height="50" fill="#0000ff" opacity="0.5" fill-opacity="0.5"/>'
+    . '<rect x="60" y="10" width="30" height="30" fill="none" stroke="#0000ff" stroke-width="10" opacity="0.5" stroke-opacity="0.5"/>'
+    . '<rect x="20" y="60" width="30" height="30" fill="#0000ff" stroke="#ff0000" stroke-width="10" opacity="0.5"/>'
+    . '<defs><pattern id="po" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="#0000ff"/></pattern></defs>'
+    . '<rect x="70" y="70" width="20" height="20" fill="url(#po)" opacity="0.5" fill-opacity="0.5"/>'), $content);
+check('opacity and fill-opacity on one shape multiply', near(pixel($image, 25, 25), QUARTER_BLUE, 20));
+check('opacity and stroke-opacity on one shape multiply', near(pixel($image, 60, 25), QUARTER_BLUE, 20));
+check('a shape with opacity, a fill and a stroke is composed first, so the stroke covers the fill under it', near(pixel($image, 22, 75), array(255, 128, 128), 30)
+    && near(pixel($image, 35, 75), HALF_BLUE, 30));
+check('opacity and fill-opacity on a pattern fill multiply', near(pixel($image, 80, 80), QUARTER_BLUE, 20));
+check('shapes with opacity leave q and Q balanced', balanced($content));
 
 $pdf = createPdf();
 $template = $pdf->startTemplate(100, 100);

@@ -1739,6 +1739,24 @@ class TCPDF {
 	protected $svgclipshapes = 0;
 
 	/**
+	 * How deep the parser is inside an element of an SVG clip path that cannot clip, such as a group.
+	 * @protected
+	 */
+	protected $svgclipskip = 0;
+
+	/**
+	 * Positions, in the clip path being recorded, of the text elements still open, innermost last.
+	 * @protected
+	 */
+	protected $svgcliptexts = array();
+
+	/**
+	 * Characters of the text element of a clip path being drawn.
+	 * @protected
+	 */
+	protected $svgcliptext = '';
+
+	/**
 	 * The SVG groups with an opacity being drawn into transparency groups, innermost last: the XObject, the
 	 * depth of the style stack the group opened at, and what to restore when it ends.
 	 * @protected
@@ -23993,14 +24011,57 @@ class TCPDF {
 	}
 
 	/**
+	 * Add the glyphs of a text element of an SVG clip path to the clipping path, as text rendering mode 7 does.
+	 * A clip path cannot be drawn inside a saved graphics state, so the text's transformation is undone after it.
+	 * @param string $name element name, text or tspan
+	 * @param float $x abscissa of the text
+	 * @param float $y ordinate of the text
+	 * @param array $tm transformation matrix of the text
+	 * @param array $svgstyle style of the text
+	 * @param array $prevsvgstyle style of its parent
+	 * @protected
+	 */
+	protected function SVGClipText($name, $x, $y, $tm, $svgstyle, $prevsvgstyle) {
+		$this->x = $x;
+		$this->y = $y;
+		$text = $this->svgcliptext;
+		if ($text === '') {
+			return;
+		}
+		$this->SVGTransform($tm);
+		$this->setSVGFont($svgstyle, $prevsvgstyle);
+		$textlen = $this->GetStringWidth($text);
+		$rtl = (isset($svgstyle['direction']) AND ($svgstyle['direction'] == 'rtl'));
+		if ($svgstyle['text-anchor'] == 'end') {
+			$this->x += ($rtl ? $textlen : -$textlen);
+		} elseif ($svgstyle['text-anchor'] == 'middle') {
+			$this->x += ($rtl ? ($textlen / 2) : -($textlen / 2));
+		}
+		$textrendermode = $this->textrendermode;
+		$textstrokewidth = $this->textstrokewidth;
+		$this->setTextRenderingMode(0, false, true);
+		$this->Cell($textlen, 0, $text, 0, 0, '', false, '', 0, false, 'L', 'T');
+		$this->textrendermode = $textrendermode;
+		$this->textstrokewidth = $textstrokewidth;
+		if ($name == 'text') {
+			$this->x = $x;
+			$this->y = $y;
+		}
+		$this->SVGTransformInverse($tm);
+		++$this->svgclipshapes;
+	}
+
+	/**
 	 * Start drawing an SVG group with an opacity below 1 into a transparency group XObject of its own, laid at
 	 * that opacity when the group ends, so the opacity applies to the group as a whole and multiplies the
 	 * opacity of what it holds. The XObject keeps the coordinates of the page; its bounding box is large enough
 	 * for any content, which is clipped where it is laid.
 	 * @param mixed $opacity opacity of the group
+	 * @param int|null $depth depth of the style stack the group belongs to, the current one when null; a shape,
+	 * which pushes no style, takes the depth after the current one
 	 * @protected
 	 */
-	protected function startSVGOpacityGroup($opacity) {
+	protected function startSVGOpacityGroup($opacity, $depth=null) {
 		$opacity = $this->getSVGOpacity($opacity);
 		if (($opacity >= 1) OR ($this->pdfa_mode AND ($this->pdfa_version < 2))) {
 			return;
@@ -24010,7 +24071,7 @@ class TCPDF {
 		$size = 1000000 / $this->k;
 		$this->svggroupstack[] = array(
 			'id' => $this->newXObject(-$size, $size, (2 * $size), (2 * $size), true),
-			'depth' => count($this->svgstyles),
+			'depth' => ($depth === null) ? count($this->svgstyles) : $depth,
 			'inxobj' => $this->inxobj,
 			'xobjid' => $this->xobjid,
 			'alpha' => $this->alpha
@@ -24022,13 +24083,13 @@ class TCPDF {
 	}
 
 	/**
-	 * End the transparency group startSVGOpacityGroup() opened at the current depth of the style stack, if any,
-	 * and lay it.
+	 * End the transparency group startSVGOpacityGroup() opened at a depth of the style stack, if any, and lay it.
+	 * @param int|null $depth depth of the style stack, the current one when null
 	 * @protected
 	 */
-	protected function endSVGOpacityGroup() {
+	protected function endSVGOpacityGroup($depth=null) {
 		$group = end($this->svggroupstack);
-		if (($group === false) OR ($group['depth'] != count($this->svgstyles))) {
+		if (($group === false) OR ($group['depth'] != (($depth === null) ? count($this->svgstyles) : $depth))) {
 			return;
 		}
 		array_pop($this->svggroupstack);
@@ -24616,8 +24677,10 @@ class TCPDF {
 			$clip_shapes = $this->svgclipshapes;
 			$this->svgclipshapes = 0;
 			foreach ($clip_path as $cp) {
+				$this->svgcliptext = isset($cp['text']) ? $cp['text'] : '';
 				$this->startSVGElementHandler('clip-path', $cp['name'], $cp['attribs'], $cp['tm']);
 			}
+			$this->svgcliptext = '';
 			if ($this->svgclipshapes == 0) {
 				// a clip path with nothing to clip with hides what it clips
 				$this->_out('0 0 0 0 re W n');
@@ -24625,9 +24688,17 @@ class TCPDF {
 			$this->svgclipshapes = $clip_shapes;
 			array_pop($this->svgstyles);
 		}
-		// opacity
-		if ($svgstyle['opacity'] != 1) {
-			$this->setAlpha($svgstyle['opacity'], 'Normal', $svgstyle['opacity'], false);
+		// opacity: a shape painting both a fill and a stroke is composed first, as a transparency group, so its
+		// stroke covers its fill; otherwise the opacity multiplies those of the fill and the stroke
+		$opacity = $this->getSVGOpacity($svgstyle['opacity']);
+		$fills_area = in_array($clip_function, array('SVGPath', 'RoundedRectXY', 'Circle', 'Ellipse', 'Polygon', 'PolyLine'));
+		$fill = $this->getSVGPaint($svgstyle['fill'], $svgstyle);
+		$stroke = $this->getSVGSolidPaint($this->getSVGPaint($svgstyle['stroke'], $svgstyle), $svgstyle);
+		if (($opacity != 1) AND $fills_area AND ($fill['type'] != 'none') AND ($stroke['type'] == 'color')) {
+			$this->startSVGOpacityGroup($opacity, (count($this->svgstyles) + 1));
+			$opacity = 1;
+		} elseif ($opacity != 1) {
+			$this->setAlpha($opacity, 'Normal', $opacity, false);
 		}
 		// color
 		$fill_color = TCPDF_COLORS::convertHTMLColorToDec($svgstyle['color'], $this->spot_colors);
@@ -24653,10 +24724,8 @@ class TCPDF {
 			$this->Rect($cx, $cy, $cw, $ch, $clip_rule, array(), array());
 		}
 		// fill
-		$fill = $this->getSVGPaint($svgstyle['fill'], $svgstyle);
-		$fills_area = in_array($clip_function, array('SVGPath', 'RoundedRectXY', 'Circle', 'Ellipse', 'Polygon', 'PolyLine'));
 		if ($fill['type'] == 'pattern') {
-			if (!$fills_area OR !$this->SVGPatternFill($fill['id'], $x, $y, $w, $h, $clip_function, $clip_params, $this->getSVGOpacity($svgstyle['fill-opacity']))) {
+			if (!$fills_area OR !$this->SVGPatternFill($fill['id'], $x, $y, $w, $h, $clip_function, $clip_params, ($opacity * $this->getSVGOpacity($svgstyle['fill-opacity'])))) {
 				$fill = $this->getSVGSolidPaint($fill, $svgstyle);
 			}
 		} elseif ($fill['type'] == 'gradient') {
@@ -24775,9 +24844,9 @@ class TCPDF {
 			$fill_color = is_array($fill['color']) ? $fill['color'] : TCPDF_COLORS::convertHTMLColorToDec($fill['color'], $this->spot_colors);
 			$fill_opacity = $this->getSVGOpacity($svgstyle['fill-opacity']) * (isset($fill['opacity']) ? $this->getSVGOpacity($fill['opacity']) : 1);
 			if ($fill_opacity != 1) {
-				$this->setAlpha($this->alpha['CA'], 'Normal', $fill_opacity, false);
+				$this->setAlpha($this->alpha['CA'], 'Normal', ($opacity * $fill_opacity), false);
 			} elseif (!is_array($fill['color']) AND preg_match('/rgba\(\d+%?,\s*\d+%?,\s*\d+%?,\s*(\d+(?:\.\d+)?)\)/i', $fill['color'], $rgba_matches)) {
-				$this->setAlpha($this->alpha['CA'], 'Normal', $rgba_matches[1], false);
+				$this->setAlpha($this->alpha['CA'], 'Normal', ($opacity * $rgba_matches[1]), false);
 			}
 			$this->setFillColorArray($fill_color);
 			if ($svgstyle['fill-rule'] == 'evenodd') {
@@ -24786,15 +24855,13 @@ class TCPDF {
 				$objstyle .= 'F';
 			}
 		}
-		// stroke
-		// a stroke is drawn in the first colour of a gradient
-		$stroke = $this->getSVGSolidPaint($this->getSVGPaint($svgstyle['stroke'], $svgstyle), $svgstyle);
+		// stroke, in the first colour of a gradient
 		if ($stroke['type'] == 'color') {
 			$stroke_opacity = $this->getSVGOpacity($svgstyle['stroke-opacity']) * (isset($stroke['opacity']) ? $this->getSVGOpacity($stroke['opacity']) : 1);
 			if ($stroke_opacity != 1) {
-				$this->setAlpha($stroke_opacity, 'Normal', $this->alpha['ca'], false);
+				$this->setAlpha(($opacity * $stroke_opacity), 'Normal', $this->alpha['ca'], false);
 			} elseif (!is_array($stroke['color']) AND preg_match('/rgba\(\d+%?,\s*\d+%?,\s*\d+%?,\s*(\d+(?:\.\d+)?)\)/i', $stroke['color'], $rgba_matches)) {
-				$this->setAlpha($rgba_matches[1], 'Normal', $this->alpha['ca'], false);
+				$this->setAlpha(($opacity * $rgba_matches[1]), 'Normal', $this->alpha['ca'], false);
 			}
 			$stroke_style = array(
 				'color' => is_array($stroke['color']) ? $stroke['color'] : TCPDF_COLORS::convertHTMLColorToDec($stroke['color'], $this->spot_colors),
@@ -24808,7 +24875,17 @@ class TCPDF {
 			$this->setLineStyle($stroke_style);
 			$objstyle .= 'D';
 		}
-		// font
+		$this->setSVGFont($svgstyle, $prevsvgstyle);
+		return $objstyle;
+	}
+
+	/**
+	 * Set the font of an SVG element.
+	 * @param array $svgstyle style of the element
+	 * @param array $prevsvgstyle style of its parent
+	 * @protected
+	 */
+	protected function setSVGFont($svgstyle, $prevsvgstyle) {
 		$regs = array();
 		if (!empty($svgstyle['font'])) {
 			if (preg_match('/font-family[\s]*:[\s]*([^\;\"]*)/si', $svgstyle['font'], $regs)) {
@@ -24903,7 +24980,6 @@ class TCPDF {
 		$this->setFont($font_family, $font_style, $font_size);
 		$this->setFontStretching($font_stretch);
 		$this->setFontSpacing($font_spacing);
-		return $objstyle;
 	}
 
 	/**
@@ -25380,6 +25456,16 @@ class TCPDF {
 		}
 		// check if we are in clip mode
 		if ($this->svgclipmode) {
+			// a clip path holds shapes, text and use elements; anything else, and what is inside it, adds nothing
+			if (($this->svgclipskip > 0) OR !in_array($name, array('path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'use'))) {
+				++$this->svgclipskip;
+				return;
+			}
+			if (($name == 'text') OR ($name == 'tspan')) {
+				// its characters are kept when it ends
+				$this->svgcliptexts[] = count($this->svgclippaths[$this->svgclipid]);
+				$this->svgtext = '';
+			}
 			$this->svgclippaths[$this->svgclipid][] = array('name' => $name, 'attribs' => $attribs, 'tm' => $this->svgcliptm[$this->svgclipid]);
 			return;
 		}
@@ -25440,6 +25526,8 @@ class TCPDF {
 					break;
 				}
 				$this->svgclipmode = true;
+				$this->svgclipskip = 0;
+				$this->svgcliptexts = array();
 				if (!isset($attribs['id'])) {
 					$attribs['id'] = 'CP_'.(count($this->svgcliptm) + 1);
 				}
@@ -25683,6 +25771,7 @@ class TCPDF {
 							if (!empty($obstyle)) {
 								$this->SVGPath($d, $obstyle);
 							}
+							$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 							$this->StopTransform();
 						}
 					}
@@ -25712,6 +25801,7 @@ class TCPDF {
 					if (!empty($obstyle)) {
 						$this->RoundedRectXY($x, $y, $w, $h, $rx, $ry, '1111', $obstyle, array(), array());
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				}
 				break;
@@ -25739,6 +25829,7 @@ class TCPDF {
 					if (!empty($obstyle)) {
 						$this->Circle($cx, $cy, $r, 0, 360, $obstyle, array(), array(), 8);
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				}
 				
@@ -25768,6 +25859,7 @@ class TCPDF {
 					if (!empty($obstyle)) {
 						$this->Ellipse($cx, $cy, $rx, $ry, 0, 0, 360, $obstyle, array(), array(), 8);
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				}
 				break;
@@ -25840,6 +25932,7 @@ class TCPDF {
 					if (!empty($obstyle)) {
 						$this->PolyLine($p, $obstyle, array(), array());
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				} else { // polygon
 					if ($clipping) {
@@ -25854,6 +25947,7 @@ class TCPDF {
 						if (!empty($obstyle)) {
 							$this->Polygon($p, $obstyle, array(), array(), true);
 						}
+						$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 						$this->StopTransform();
 					}
 				}
@@ -25978,11 +26072,9 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				if ($clipping) {
-					// text cannot clip yet: it is drawn, and the clip path is not taken as empty
-					++$this->svgclipshapes;
+				if (!$clipping) {
+					array_push($this->svgstyles, $svgstyle);
 				}
-				array_push($this->svgstyles, $svgstyle);
 				if (isset($attribs['x'])) {
 					$x = $this->getSVGLength($attribs['x'], 'x');
 				} elseif ($name == 'tspan') {
@@ -26002,6 +26094,10 @@ class TCPDF {
 				}
 				if (isset($attribs['dy'])) {
 					$y += $this->getSVGLength($attribs['dy'], 'y');
+				}
+				if ($clipping) {
+					$this->SVGClipText($name, $x, $y, $tm, $svgstyle, $prev_svgstyle);
+					break;
 				}
 				// text is filled with the first colour of a gradient
 				$fill_paint = $this->getSVGPaint($svgstyle['fill'], $svgstyle);
@@ -26032,7 +26128,7 @@ class TCPDF {
 				$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, 1, 1);
 				if (($fill_paint['type'] == 'gradient') AND ($text_paint['type'] == 'color')) {
 					// setSVGStyles() paints no gradient outside a shape, so its fill opacity is set here
-					$text_opacity = $this->getSVGOpacity($svgstyle['fill-opacity']) * $this->getSVGOpacity($text_paint['opacity']);
+					$text_opacity = $this->getSVGOpacity($svgstyle['opacity']) * $this->getSVGOpacity($svgstyle['fill-opacity']) * $this->getSVGOpacity($text_paint['opacity']);
 					if ($text_opacity != 1) {
 						$this->setAlpha($this->alpha['CA'], 'Normal', $text_opacity, false);
 					}
@@ -26063,7 +26159,16 @@ class TCPDF {
 					// in a clip path a use clips with the shape or text it uses and adds nothing for anything else;
 					// a clip path cannot be drawn inside a saved graphics state, so the matrix is passed on
 					if (in_array($use['name'], array('path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text'))) {
+						// a used text keeps its characters with its closing tag
+						$cliptext = $this->svgcliptext;
+						$this->svgcliptext = '';
+						foreach ((isset($use['attribs']['child_elements']) ? $use['attribs']['child_elements'] : array()) as $child) {
+							if (!empty($child['attribs']['closing_tag']) AND ($child['name'] == 'text') AND isset($child['attribs']['content'])) {
+								$this->svgcliptext = $child['attribs']['content'];
+							}
+						}
 						$this->startSVGElementHandler('clip-path', $use['name'], $use['attribs'], $tm);
+						$this->svgcliptext = $cliptext;
 					}
 				} else {
 					$this->StartTransform();
@@ -26120,6 +26225,16 @@ class TCPDF {
 				--$this->svgpatternrecord['depth'];
 			}
 			$this->svgpatterns[$this->svgpatternrecord['id']]['children'][] = array('end', $name);
+			return;
+		}
+		if ($this->svgclipmode AND (($this->svgclipskip > 0) OR ($name != 'clipPath'))) {
+			// the elements of a clip path are only recorded, and drawn where it clips
+			if ($this->svgclipskip > 0) {
+				--$this->svgclipskip;
+			} elseif ((($name == 'text') OR ($name == 'tspan')) AND !empty($this->svgcliptexts)) {
+				$this->svgclippaths[$this->svgclipid][array_pop($this->svgcliptexts)]['text'] = $this->svgtext;
+				$this->svgtext = '';
+			}
 			return;
 		}
 		if ($this->svgdefsmode AND !in_array($name, array('defs', 'clipPath', 'linearGradient', 'radialGradient', 'stop'))) {
