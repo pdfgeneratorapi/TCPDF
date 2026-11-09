@@ -1721,10 +1721,29 @@ class TCPDF {
 	protected $svgclipstyles = array();
 
 	/**
-	 * Width and height of the viewport of the SVG root element, in user units, for lengths in percentages.
+	 * Width and height of the current SVG viewport, in user units, for lengths in percentages.
 	 * @protected
 	 */
 	protected $svgviewport = array(0, 0);
+
+	/**
+	 * The SVG viewports around the current one, outermost first.
+	 * @protected
+	 */
+	protected $svgviewports = array();
+
+	/**
+	 * Shapes drawn so far into the SVG clip path being set: one with none hides what it clips.
+	 * @protected
+	 */
+	protected $svgclipshapes = 0;
+
+	/**
+	 * The SVG groups with an opacity being drawn into transparency groups, innermost last: the XObject, the
+	 * depth of the style stack the group opened at, and what to restore when it ends.
+	 * @protected
+	 */
+	protected $svggroupstack = array();
 
 	/**
 	 * Rules of the SVG style elements: 'rules' in cascade order, and an 'index' of their positions by the id,
@@ -23446,6 +23465,8 @@ class TCPDF {
 		$this->svgpatternstack = array();
 		$this->svgpatterntiles = array();
 		$this->svgclipstyles = array();
+		$this->svggroupstack = array();
+		$this->svgviewports = array();
 		$this->svgcssrules = array();
 		$this->svgancestors = array();
 		$this->svgstyles = array($this->svgstyles[0]);
@@ -23599,11 +23620,22 @@ class TCPDF {
 		// sets the character data handler function for the XML parser
 		xml_set_character_data_handler($parser, [$this, 'segSVGContentHandler']);
 		// start parsing an XML document
-		if (!xml_parse($parser, $svgdata)) {
-			$error_message = sprintf('SVG Error: %s at line %d', xml_error_string(xml_get_error_code($parser)), xml_get_current_line_number($parser));
-			$this->Error($error_message);
+		try {
+			if (!xml_parse($parser, $svgdata)) {
+				$error_message = sprintf('SVG Error: %s at line %d', xml_error_string(xml_get_error_code($parser)), xml_get_current_line_number($parser));
+				$this->Error($error_message);
+			}
+		} finally {
+			if (!empty($this->svggroupstack)) {
+				// a group left open by an error: what follows is drawn where the SVG started
+				$group = reset($this->svggroupstack);
+				$this->inxobj = $group['inxobj'];
+				$this->xobjid = $group['xobjid'];
+				$this->alpha = $group['alpha'];
+				$this->svggroupstack = array();
+			}
 		}
-		
+
 		// free this XML parser (does nothing in PHP >= 8.0)
 		if (function_exists('xml_parser_free') && PHP_VERSION_ID < 80000) {
 		    xml_parser_free($parser);
@@ -23753,6 +23785,28 @@ class TCPDF {
 	 */
 	protected function getSVGUnitScale() {
 		return $this->getHTMLUnitToUnits(1, 0, $this->svgunit, false);
+	}
+
+	/**
+	 * An SVG length in user units. A percentage is a share of the current viewport: of its width for a
+	 * horizontal length, of its height for a vertical one, and of its normalised diagonal for any other.
+	 * @param string $value length
+	 * @param string $axis 'x', 'y', or 'd' for the diagonal
+	 * @return float
+	 * @protected
+	 */
+	protected function getSVGLength($value, $axis) {
+		$refsize = 0;
+		if (substr(trim((string) $value), -1) == '%') {
+			if ($axis == 'x') {
+				$refsize = $this->svgviewport[0];
+			} elseif ($axis == 'y') {
+				$refsize = $this->svgviewport[1];
+			} else {
+				$refsize = sqrt(((pow($this->svgviewport[0], 2) + pow($this->svgviewport[1], 2)) / 2));
+			}
+		}
+		return $this->getHTMLUnitToUnits($value, $refsize, $this->svgunit, false);
 	}
 
 	/**
@@ -23939,6 +23993,55 @@ class TCPDF {
 	}
 
 	/**
+	 * Start drawing an SVG group with an opacity below 1 into a transparency group XObject of its own, laid at
+	 * that opacity when the group ends, so the opacity applies to the group as a whole and multiplies the
+	 * opacity of what it holds. The XObject keeps the coordinates of the page; its bounding box is large enough
+	 * for any content, which is clipped where it is laid.
+	 * @param mixed $opacity opacity of the group
+	 * @protected
+	 */
+	protected function startSVGOpacityGroup($opacity) {
+		$opacity = $this->getSVGOpacity($opacity);
+		if (($opacity >= 1) OR ($this->pdfa_mode AND ($this->pdfa_version < 2))) {
+			return;
+		}
+		// the group is laid at its opacity alone, whatever its own fill set
+		$this->setAlpha($opacity, 'Normal', $opacity, false);
+		$size = 1000000 / $this->k;
+		$this->svggroupstack[] = array(
+			'id' => $this->newXObject(-$size, $size, (2 * $size), (2 * $size), true),
+			'depth' => count($this->svgstyles),
+			'inxobj' => $this->inxobj,
+			'xobjid' => $this->xobjid,
+			'alpha' => $this->alpha
+		);
+		$this->inxobj = true;
+		$this->xobjid = $this->svggroupstack[(count($this->svggroupstack) - 1)]['id'];
+		// a transparency group starts opaque
+		$this->alpha = array('CA' => 1, 'ca' => 1, 'BM' => '/Normal', 'AIS' => false);
+	}
+
+	/**
+	 * End the transparency group startSVGOpacityGroup() opened at the current depth of the style stack, if any,
+	 * and lay it.
+	 * @protected
+	 */
+	protected function endSVGOpacityGroup() {
+		$group = end($this->svggroupstack);
+		if (($group === false) OR ($group['depth'] != count($this->svgstyles))) {
+			return;
+		}
+		array_pop($this->svggroupstack);
+		$this->inxobj = $group['inxobj'];
+		$this->xobjid = $group['xobjid'];
+		$this->alpha = $group['alpha'];
+		if ($this->inxobj) {
+			$this->xobjects[$this->xobjid]['xobjects'][$group['id']] = $this->xobjects[$group['id']];
+		}
+		$this->_out('/'.$group['id'].' Do');
+	}
+
+	/**
 	 * Matrix from the content of an SVG pattern to its tile, with its translation in user units.
 	 * @param array $attribs pattern attributes
 	 * @param float $tw tile width
@@ -23986,10 +24089,10 @@ class TCPDF {
 			list($x, $y, $w, $h) = $bbox;
 		}
 		if (isset($attribs['patternUnits']) AND ($attribs['patternUnits'] == 'userSpaceOnUse')) {
-			$tx = isset($attribs['x']) ? $this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false) : 0;
-			$ty = isset($attribs['y']) ? $this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false) : 0;
-			$tw = isset($attribs['width']) ? $this->getHTMLUnitToUnits($attribs['width'], 0, $this->svgunit, false) : 0;
-			$th = isset($attribs['height']) ? $this->getHTMLUnitToUnits($attribs['height'], 0, $this->svgunit, false) : 0;
+			$tx = isset($attribs['x']) ? $this->getSVGLength($attribs['x'], 'x') : 0;
+			$ty = isset($attribs['y']) ? $this->getSVGLength($attribs['y'], 'y') : 0;
+			$tw = isset($attribs['width']) ? $this->getSVGLength($attribs['width'], 'x') : 0;
+			$th = isset($attribs['height']) ? $this->getSVGLength($attribs['height'], 'y') : 0;
 		} else {
 			$tx = $x + ($this->getSVGFraction($attribs, 'x', 0) * $w);
 			$ty = $y + ($this->getSVGFraction($attribs, 'y', 0) * $h);
@@ -24510,9 +24613,16 @@ class TCPDF {
 			$clip_path = $this->svgclippaths[$regs[1]];
 			// the elements of a clip path inherit from the clipPath element, not from the element it clips
 			array_push($this->svgstyles, isset($this->svgclipstyles[$regs[1]]) ? $this->svgclipstyles[$regs[1]] : $this->svgstyles[0]);
+			$clip_shapes = $this->svgclipshapes;
+			$this->svgclipshapes = 0;
 			foreach ($clip_path as $cp) {
 				$this->startSVGElementHandler('clip-path', $cp['name'], $cp['attribs'], $cp['tm']);
 			}
+			if ($this->svgclipshapes == 0) {
+				// a clip path with nothing to clip with hides what it clips
+				$this->_out('0 0 0 0 re W n');
+			}
+			$this->svgclipshapes = $clip_shapes;
 			array_pop($this->svgstyles);
 		}
 		// opacity
@@ -24688,7 +24798,7 @@ class TCPDF {
 			}
 			$stroke_style = array(
 				'color' => is_array($stroke['color']) ? $stroke['color'] : TCPDF_COLORS::convertHTMLColorToDec($stroke['color'], $this->spot_colors),
-				'width' => $this->getHTMLUnitToUnits($svgstyle['stroke-width'], 0, $this->svgunit, false),
+				'width' => $this->getSVGLength($svgstyle['stroke-width'], 'd'),
 				'cap' => $svgstyle['stroke-linecap'],
 				'join' => $svgstyle['stroke-linejoin']
 				);
@@ -25349,18 +25459,23 @@ class TCPDF {
 				// inner SVG
 				array_push($this->svgstyles, $svgstyle);
 				$this->StartTransform();
-				$svgX = (isset($attribs['x'])?$attribs['x']:0);
-				$svgY = (isset($attribs['y'])?$attribs['y']:0);
-				$svgW = (isset($attribs['width'])?$attribs['width']:0);
-				$svgH = (isset($attribs['height'])?$attribs['height']:0);
+				// its position and size, percentages being shares of the viewport around it, and in SVG units for the matrix
+				$unit = $this->getSVGUnitScale();
+				$w = $this->getSVGLength((isset($attribs['width']) ? $attribs['width'] : '100%'), 'x');
+				$h = $this->getSVGLength((isset($attribs['height']) ? $attribs['height'] : '100%'), 'y');
+				$svgX = isset($attribs['x']) ? ($this->getSVGLength($attribs['x'], 'x') / $unit) : 0;
+				$svgY = isset($attribs['y']) ? ($this->getSVGLength($attribs['y'], 'y') / $unit) : 0;
+				$svgW = $w / $unit;
+				$svgH = $h / $unit;
+				// its content takes percentages from its own viewport
+				$this->svgviewports[] = $this->svgviewport;
+				$this->svgviewport = array($w, $h);
 				// set x, y position using transform matrix
 				$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array( 1, 0, 0, 1, $svgX, $svgY));
 				$this->SVGTransform($tm);
 				// set clipping for width and height
 				$x = 0;
 				$y = 0;
-				$w = (isset($attribs['width'])?$this->getHTMLUnitToUnits($attribs['width'], 0, $this->svgunit, false):$this->w);
-				$h = (isset($attribs['height'])?$this->getHTMLUnitToUnits($attribs['height'], 0, $this->svgunit, false):$this->h);
 				// draw clipping rect
 				$this->Rect($x, $y, $w, $h, 'CNZ', array(), array());
 				// parse viewbox, calculate extra transformation matrix
@@ -25373,6 +25488,7 @@ class TCPDF {
 						$vy = $tmp[1];
 						$vw = $tmp[2];
 						$vh = $tmp[3];
+						$this->svgviewport = array(($vw * $unit), ($vh * $unit));
 						// get aspect ratio
 						$tmp = array();
 						$aspectX = 'xMid';
@@ -25417,6 +25533,9 @@ class TCPDF {
 					}
 				}
 				$this->setSVGStyles($svgstyle, $prev_svgstyle);
+				if (!$clipping) {
+					$this->startSVGOpacityGroup($svgstyle['opacity']);
+				}
 				break;
 			}
 			case 'g': {
@@ -25430,6 +25549,9 @@ class TCPDF {
 				$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array($w, 0, 0, $h, $x, $y));
 				$this->SVGTransform($tm);
 				$this->setSVGStyles($svgstyle, $prev_svgstyle);
+				if (!$clipping) {
+					$this->startSVGOpacityGroup($svgstyle['opacity']);
+				}
 				break;
 			}
 			case 'linearGradient': {
@@ -25553,6 +25675,7 @@ class TCPDF {
 							$this->SVGTransform($tm);
 							$this->SVGPath($d, $clip_operator);
 							$this->SVGTransformInverse($tm);
+							++$this->svgclipshapes;
 						} else {
 							$this->StartTransform();
 							$this->SVGTransform($tm);
@@ -25571,16 +25694,17 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$x = (isset($attribs['x'])?$this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false):0);
-				$y = (isset($attribs['y'])?$this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false):0);
-				$w = (isset($attribs['width'])?$this->getHTMLUnitToUnits($attribs['width'], 0, $this->svgunit, false):0);
-				$h = (isset($attribs['height'])?$this->getHTMLUnitToUnits($attribs['height'], 0, $this->svgunit, false):0);
-				$rx = (isset($attribs['rx'])?$this->getHTMLUnitToUnits($attribs['rx'], 0, $this->svgunit, false):0);
-				$ry = (isset($attribs['ry'])?$this->getHTMLUnitToUnits($attribs['ry'], 0, $this->svgunit, false):$rx);
+				$x = (isset($attribs['x'])?$this->getSVGLength($attribs['x'], 'x'):0);
+				$y = (isset($attribs['y'])?$this->getSVGLength($attribs['y'], 'y'):0);
+				$w = (isset($attribs['width'])?$this->getSVGLength($attribs['width'], 'x'):0);
+				$h = (isset($attribs['height'])?$this->getSVGLength($attribs['height'], 'y'):0);
+				$rx = (isset($attribs['rx'])?$this->getSVGLength($attribs['rx'], 'x'):0);
+				$ry = (isset($attribs['ry'])?$this->getSVGLength($attribs['ry'], 'y'):$rx);
 				if ($clipping) {
 					$this->SVGTransform($tm);
 					$this->RoundedRectXY($x, $y, $w, $h, $rx, $ry, '1111', $clip_operator, array(), array());
 					$this->SVGTransformInverse($tm);
+					++$this->svgclipshapes;
 				} else {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
@@ -25596,9 +25720,9 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$r = (isset($attribs['r']) ? $this->getHTMLUnitToUnits($attribs['r'], 0, $this->svgunit, false) : 0);
-				$cx = (isset($attribs['cx']) ? $this->getHTMLUnitToUnits($attribs['cx'], 0, $this->svgunit, false) : (isset($attribs['x']) ? $this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false) : 0));
-				$cy = (isset($attribs['cy']) ? $this->getHTMLUnitToUnits($attribs['cy'], 0, $this->svgunit, false) : (isset($attribs['y']) ? $this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false) : 0));
+				$r = (isset($attribs['r']) ? $this->getSVGLength($attribs['r'], 'd') : 0);
+				$cx = (isset($attribs['cx']) ? $this->getSVGLength($attribs['cx'], 'x') : (isset($attribs['x']) ? $this->getSVGLength($attribs['x'], 'x') : 0));
+				$cy = (isset($attribs['cy']) ? $this->getSVGLength($attribs['cy'], 'y') : (isset($attribs['y']) ? $this->getSVGLength($attribs['y'], 'y') : 0));
 				$x = ($cx - $r);
 				$y = ($cy - $r);
 				$w = (2 * $r);
@@ -25607,6 +25731,7 @@ class TCPDF {
 					$this->SVGTransform($tm);
 					$this->Circle($cx, $cy, $r, 0, 360, $clip_operator, array(), array(), 8);
 					$this->SVGTransformInverse($tm);
+					++$this->svgclipshapes;
 				} else {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
@@ -25623,10 +25748,10 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$rx = (isset($attribs['rx']) ? $this->getHTMLUnitToUnits($attribs['rx'], 0, $this->svgunit, false) : 0);
-				$ry = (isset($attribs['ry']) ? $this->getHTMLUnitToUnits($attribs['ry'], 0, $this->svgunit, false) : 0);
-				$cx = (isset($attribs['cx']) ? $this->getHTMLUnitToUnits($attribs['cx'], 0, $this->svgunit, false) : (isset($attribs['x']) ? $this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false) : 0));
-				$cy = (isset($attribs['cy']) ? $this->getHTMLUnitToUnits($attribs['cy'], 0, $this->svgunit, false) : (isset($attribs['y']) ? $this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false) : 0));
+				$rx = (isset($attribs['rx']) ? $this->getSVGLength($attribs['rx'], 'x') : 0);
+				$ry = (isset($attribs['ry']) ? $this->getSVGLength($attribs['ry'], 'y') : 0);
+				$cx = (isset($attribs['cx']) ? $this->getSVGLength($attribs['cx'], 'x') : (isset($attribs['x']) ? $this->getSVGLength($attribs['x'], 'x') : 0));
+				$cy = (isset($attribs['cy']) ? $this->getSVGLength($attribs['cy'], 'y') : (isset($attribs['y']) ? $this->getSVGLength($attribs['y'], 'y') : 0));
 				$x = ($cx - $rx);
 				$y = ($cy - $ry);
 				$w = (2 * $rx);
@@ -25635,6 +25760,7 @@ class TCPDF {
 					$this->SVGTransform($tm);
 					$this->Ellipse($cx, $cy, $rx, $ry, 0, 0, 360, $clip_operator, array(), array(), 8);
 					$this->SVGTransformInverse($tm);
+					++$this->svgclipshapes;
 				} else {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
@@ -25650,10 +25776,10 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$x1 = (isset($attribs['x1'])?$this->getHTMLUnitToUnits($attribs['x1'], 0, $this->svgunit, false):0);
-				$y1 = (isset($attribs['y1'])?$this->getHTMLUnitToUnits($attribs['y1'], 0, $this->svgunit, false):0);
-				$x2 = (isset($attribs['x2'])?$this->getHTMLUnitToUnits($attribs['x2'], 0, $this->svgunit, false):0);
-				$y2 = (isset($attribs['y2'])?$this->getHTMLUnitToUnits($attribs['y2'], 0, $this->svgunit, false):0);
+				$x1 = (isset($attribs['x1'])?$this->getSVGLength($attribs['x1'], 'x'):0);
+				$y1 = (isset($attribs['y1'])?$this->getSVGLength($attribs['y1'], 'y'):0);
+				$x2 = (isset($attribs['x2'])?$this->getSVGLength($attribs['x2'], 'x'):0);
+				$y2 = (isset($attribs['y2'])?$this->getSVGLength($attribs['y2'], 'y'):0);
 				$x = $x1;
 				$y = $y1;
 				$w = abs($x2 - $x1);
@@ -25701,6 +25827,13 @@ class TCPDF {
 				$w = ($xmax - $xmin);
 				$h = ($ymax - $ymin);
 				if ($name == 'polyline') {
+					if ($clipping) {
+						$this->SVGTransform($tm);
+						$this->PolyLine($p, $clip_operator, array(), array());
+						$this->SVGTransformInverse($tm);
+						++$this->svgclipshapes;
+						break;
+					}
 					$this->StartTransform();
 					$this->SVGTransform($tm);
 					$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'PolyLine', array($p, $fill_clip_operator));
@@ -25713,6 +25846,7 @@ class TCPDF {
 						$this->SVGTransform($tm);
 						$this->Polygon($p, $clip_operator, array(), array(), true);
 						$this->SVGTransformInverse($tm);
+						++$this->svgclipshapes;
 					} else {
 						$this->StartTransform();
 						$this->SVGTransform($tm);
@@ -25733,10 +25867,10 @@ class TCPDF {
 				if (!isset($attribs['xlink:href']) OR empty($attribs['xlink:href'])) {
 					break;
 				}
-				$x = (isset($attribs['x'])?$this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false):0);
-				$y = (isset($attribs['y'])?$this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false):0);
-				$w = (isset($attribs['width'])?$this->getHTMLUnitToUnits($attribs['width'], 0, $this->svgunit, false):0);
-				$h = (isset($attribs['height'])?$this->getHTMLUnitToUnits($attribs['height'], 0, $this->svgunit, false):0);
+				$x = (isset($attribs['x'])?$this->getSVGLength($attribs['x'], 'x'):0);
+				$y = (isset($attribs['y'])?$this->getSVGLength($attribs['y'], 'y'):0);
+				$w = (isset($attribs['width'])?$this->getSVGLength($attribs['width'], 'x'):0);
+				$h = (isset($attribs['height'])?$this->getSVGLength($attribs['height'], 'y'):0);
 				$img = $attribs['xlink:href'];
 				if (!$clipping) {
 					$this->StartTransform();
@@ -25796,6 +25930,8 @@ class TCPDF {
 						$svgpatterntiles = $this->svgpatterntiles;
 						$svgclipstyles = $this->svgclipstyles;
 						$svgviewport = $this->svgviewport;
+						$svgviewports = $this->svgviewports;
+						$svggroupstack = $this->svggroupstack;
 						$svgcssrules = $this->svgcssrules;
 						$svgstyles = $this->svgstyles;
 						$svg_tag_depth = $this->svg_tag_depth;
@@ -25818,6 +25954,8 @@ class TCPDF {
 						$this->svgpatterntiles = $svgpatterntiles;
 						$this->svgclipstyles = $svgclipstyles;
 						$this->svgviewport = $svgviewport;
+						$this->svgviewports = $svgviewports;
+						$this->svggroupstack = $svggroupstack;
 						$this->svgcssrules = $svgcssrules;
 						$this->svgstyles = $svgstyles;
 						$this->svg_tag_depth = $svg_tag_depth;
@@ -25840,26 +25978,30 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
+				if ($clipping) {
+					// text cannot clip yet: it is drawn, and the clip path is not taken as empty
+					++$this->svgclipshapes;
+				}
 				array_push($this->svgstyles, $svgstyle);
 				if (isset($attribs['x'])) {
-					$x = $this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false);
+					$x = $this->getSVGLength($attribs['x'], 'x');
 				} elseif ($name == 'tspan') {
 					$x = $this->x;
 				} else {
 					$x = 0;
 				}
 				if (isset($attribs['dx'])) {
-					$x += $this->getHTMLUnitToUnits($attribs['dx'], 0, $this->svgunit, false);
+					$x += $this->getSVGLength($attribs['dx'], 'x');
 				}
 				if (isset($attribs['y'])) {
-					$y = $this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false);
+					$y = $this->getSVGLength($attribs['y'], 'y');
 				} elseif ($name == 'tspan') {
 					$y = $this->y;
 				} else {
 					$y = 0;
 				}
 				if (isset($attribs['dy'])) {
-					$y += $this->getHTMLUnitToUnits($attribs['dy'], 0, $this->svgunit, false);
+					$y += $this->getSVGLength($attribs['dy'], 'y');
 				}
 				// text is filled with the first colour of a gradient
 				$fill_paint = $this->getSVGPaint($svgstyle['fill'], $svgstyle);
@@ -25881,7 +26023,7 @@ class TCPDF {
 					$this->svgtextmode['rtl'] = false;
 				}
 				if (isset($svgstyle['stroke']) AND ($svgstyle['stroke'] != 'none') AND isset($svgstyle['stroke-width']) AND ($svgstyle['stroke-width'] > 0)) {
-					$this->svgtextmode['stroke'] = $this->getHTMLUnitToUnits($svgstyle['stroke-width'], 0, $this->svgunit, false);
+					$this->svgtextmode['stroke'] = $this->getSVGLength($svgstyle['stroke-width'], 'd');
 				} else {
 					$this->svgtextmode['stroke'] = false;
 				}
@@ -25913,18 +26055,23 @@ class TCPDF {
 				// then the element's own transform; the element inherits from it, its style rules already applied
 				// where it is defined
 				$unit = $this->getSVGUnitScale();
-				$use_x = isset($attribs['x']) ? ($this->getHTMLUnitToUnits($attribs['x'], $this->svgviewport[0], $this->svgunit, false) / $unit) : 0;
-				$use_y = isset($attribs['y']) ? ($this->getHTMLUnitToUnits($attribs['y'], $this->svgviewport[1], $this->svgunit, false) / $unit) : 0;
+				$use_x = isset($attribs['x']) ? ($this->getSVGLength($attribs['x'], 'x') / $unit) : 0;
+				$use_y = isset($attribs['y']) ? ($this->getSVGLength($attribs['y'], 'y') / $unit) : 0;
 				$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array(1, 0, 0, 1, $use_x, $use_y));
 				array_push($this->svgstyles, $svgstyle);
 				if ($clipping) {
+					// in a clip path a use clips with the shape or text it uses and adds nothing for anything else;
 					// a clip path cannot be drawn inside a saved graphics state, so the matrix is passed on
-					$this->startSVGElementHandler('clip-path', $use['name'], $use['attribs'], $tm);
+					if (in_array($use['name'], array('path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text'))) {
+						$this->startSVGElementHandler('clip-path', $use['name'], $use['attribs'], $tm);
+					}
 				} else {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
 					$this->setSVGStyles($svgstyle, $prev_svgstyle);
+					$this->startSVGOpacityGroup($svgstyle['opacity']);
 					$this->startSVGElementHandler('use', $use['name'], $use['attribs']);
+					$this->endSVGOpacityGroup();
 					$this->StopTransform();
 				}
 				array_pop($this->svgstyles);
@@ -26008,8 +26155,13 @@ class TCPDF {
 					array_pop($this->svgstyles);
 					break;
 				}
+				// back to the viewport around the inner svg
+				if (!empty($this->svgviewports)) {
+					$this->svgviewport = array_pop($this->svgviewports);
+				}
 			}
 			case 'g': {
+				$this->endSVGOpacityGroup();
 				// ungroup: remove last style from array
 				array_pop($this->svgstyles);
 				$this->StopTransform();

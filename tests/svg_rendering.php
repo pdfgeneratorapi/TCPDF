@@ -223,6 +223,24 @@ $image = render(svg('<defs><rect id="half" width="50" height="100"/><clipPath id
 check('a use inside a transformed clip path moves by its x and the clip path\'s transform',
     near(pixel($image, 75, 75), RED) && near(pixel($image, 25, 75), WHITE) && near(pixel($image, 75, 25), WHITE));
 
+$group = '<defs><g id="grp"><rect width="50" height="100" fill="#0000ff"/></g></defs>';
+
+$image = render(svg($group . '<clipPath id="c"><use href="#grp"/></clipPath><rect clip-path="url(#c)" width="100" height="100" fill="red"/>'), $content);
+check('a use of a group adds nothing to a clip path, which then hides what it clips', near(pixel($image, 25, 50), WHITE) && near(pixel($image, 75, 50), WHITE));
+check('a clip path with a use of a group leaves q and Q balanced', balanced($content));
+
+$image = render(svg($group . '<clipPath id="c"><use href="#grp"/><rect width="30" height="100"/></clipPath>'
+    . '<rect clip-path="url(#c)" width="100" height="100" fill="red"/>'));
+check('a clip path clips with the shapes beside a use of a group', near(pixel($image, 15, 50), RED) && near(pixel($image, 40, 50), WHITE));
+
+$image = render(svg('<defs><clipPath id="empty"></clipPath></defs><rect clip-path="url(#empty)" width="100" height="100" fill="red"/>'
+    . '<rect x="60" y="60" width="30" height="30" fill="#0000ff"/>'));
+check('an empty clip path hides what it clips', near(pixel($image, 30, 30), WHITE));
+check('an empty clip path does not hide what follows', near(pixel($image, 75, 75), BLUE));
+
+$image = render(svg('<rect clip-path="url(#missing)" width="100" height="100" fill="red"/>'));
+check('a clip-path referencing nothing leaves the element unclipped', near(pixel($image, 50, 50), RED));
+
 // --- linear gradients ------------------------------------------------------------------
 
 $image = render(svg('<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff0000"/>'
@@ -520,6 +538,72 @@ check('presentation attributes on the root svg are inherited', near(pixel($image
 
 $image = render(svg('<rect x="10" y="10" width="20" height="20" fill="#ff0000"/>'));
 check('an SVG drawn after one with root attributes does not inherit them', near(pixel($image, 20, 20), RED));
+
+// --- group opacity ---------------------------------------------------------------------
+
+const QUARTER_BLUE = array(191, 191, 255);
+const HALF_BLUE = array(128, 128, 255);
+
+$image = render(svg('<defs><rect id="r" width="40" height="40" fill="#0000ff" opacity="0.5"/></defs><use href="#r" opacity="0.5"/>'
+    . '<g opacity="0.5"><rect x="50" y="50" width="40" height="40" fill="#0000ff" fill-opacity="0.5"/></g>'), $content);
+check('opacity on a use multiplies the opacity of what it uses', near(pixel($image, 20, 20), QUARTER_BLUE, 20));
+check('opacity on a group multiplies the fill opacity inside it', near(pixel($image, 70, 70), QUARTER_BLUE, 20));
+check('groups with opacity leave q and Q balanced', balanced($content));
+
+$image = render(svg('<g opacity="0.5"><rect width="60" height="60" fill="#0000ff"/><rect x="30" y="30" width="60" height="60" fill="#0000ff"/></g>'
+    . '<rect x="70" width="30" height="20" fill="#0000ff"/>'));
+check('a group with opacity is composed first, so its overlapping shapes do not add up', near(pixel($image, 45, 45), HALF_BLUE, 30)
+    && near(pixel($image, 15, 15), HALF_BLUE, 30));
+check('what follows a group with opacity is opaque', near(pixel($image, 85, 10), BLUE));
+
+$image = render(svg('<g opacity="0.5"><g opacity="0.5"><rect width="50" height="50" fill="#0000ff"/></g></g>'
+    . '<svg x="50" y="50" width="50" height="50" opacity="0.5"><rect width="50" height="50" fill="#0000ff" opacity="0.5"/></svg>'));
+check('nested groups multiply their opacities', near(pixel($image, 25, 25), QUARTER_BLUE, 20));
+check('opacity on a nested svg multiplies the opacity inside it', near(pixel($image, 75, 75), QUARTER_BLUE, 20));
+
+$pdf = createPdf();
+$template = $pdf->startTemplate(100, 100);
+$pdf->ImageSVG('@' . svg('<g opacity="0.5"><rect width="50" height="50" fill="#0000ff" opacity="0.5"/></g>'), 0, 0, 100, 100);
+$pdf->endTemplate();
+$pdf->printTemplate($template, 0, 0, 100, 100);
+check('a group with opacity draws inside an XObject template', near(pixel(rasterize($pdf), 25, 25), QUARTER_BLUE, 20));
+
+// --- lengths in percentages ------------------------------------------------------------
+
+$image = render('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect x="50%" y="25%" width="25%" height="50%" fill="#0000ff"/></svg>');
+check('rect lengths in percentages are shares of the viewport', near(pixel($image, 60, 50), BLUE) && near(pixel($image, 40, 50), WHITE)
+    && near(pixel($image, 80, 50), WHITE) && near(pixel($image, 60, 20), WHITE) && near(pixel($image, 60, 80), WHITE));
+
+$image = render('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100"><circle cx="50%" cy="50%" r="10%" fill="#0000ff"/></svg>');
+check('a circle radius in percentages is a share of the normalised viewport diagonal', near(pixel($image, 50, 50), BLUE) && near(pixel($image, 56, 50), BLUE)
+    && near(pixel($image, 60, 50), WHITE));
+
+$image = render(svg('<ellipse cx="50%" cy="50%" rx="40%" ry="10%" fill="#0000ff"/>'));
+check('ellipse lengths in percentages are shares of the viewport', near(pixel($image, 85, 50), BLUE) && near(pixel($image, 50, 45), BLUE)
+    && near(pixel($image, 50, 38), WHITE));
+
+$image = render(svg('<line x1="0" y1="50%" x2="100%" y2="50%" stroke="#0000ff" stroke-width="10%"/>'));
+check('line ends and a stroke width in percentages are shares of the viewport', near(pixel($image, 90, 47), BLUE) && near(pixel($image, 90, 40), WHITE));
+
+$image = render(svg('<svg x="50%" width="50%" height="50%"><rect width="100%" height="100%" fill="#0000ff"/></svg>'));
+check('a nested svg in percentages is placed in the viewport, and lengths inside it are shares of its own', near(pixel($image, 75, 25), BLUE)
+    && near(pixel($image, 25, 25), WHITE) && near(pixel($image, 75, 75), WHITE));
+
+$image = render(svg('<defs><pattern id="pc" width="10%" height="10%" patternUnits="userSpaceOnUse"><rect width="5" height="10" fill="#0000ff"/></pattern></defs>'
+    . '<rect width="100" height="100" fill="url(#pc)"/>'));
+check('a user-space pattern tile in percentages is a share of the viewport', near(pixel($image, 2, 50), BLUE) && near(pixel($image, 7, 50), WHITE));
+
+$image = render(svg('<text x="50%" y="90" font-size="80" font-weight="bold">I</text>'));
+$text_left = null;
+for ($x = 0; ($x < 100) && ($text_left === null); ++$x) {
+    for ($y = 0; $y < 100; ++$y) {
+        if (!near(pixel($image, $x, $y), WHITE, 10)) {
+            $text_left = $x;
+            break;
+        }
+    }
+}
+check('text x in percentages is a share of the viewport width', ($text_left !== null) && ($text_left >= 50) && ($text_left < 60));
 
 echo PHP_EOL . ($failures === 0 ? 'All checks passed' : $failures . ' check(s) failed') . PHP_EOL;
 exit($failures === 0 ? 0 : 1);
