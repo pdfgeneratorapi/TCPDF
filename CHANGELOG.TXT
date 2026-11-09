@@ -1,4 +1,15 @@
-6.11.4 (unreleased)
+6.11.3.2 (2026-11-09)
+	- Added SVG pattern fills: the tile is drawn once, as a transparency group XObject, and laid as many times as it takes to cover the shape, also inside an XObject template; patternUnits, patternContentUnits, viewBox, preserveAspectRatio, patternTransform and href are read, and setSVGPatternTileLimit() caps the tiles one fill may lay before it paints its fallback colour.
+	- Added SVG style rules: type, universal, class and id selectors, joined by descendant or child combinators, in cascade order; a rule beats a presentation attribute and the style attribute beats a rule. A var() takes its fallback, initial and unset resolve, and a value TCPDF cannot read is left out.
+	- Added SVG group opacity: a g, use or inner svg element with an opacity is drawn as a transparency group, so the opacities inside it multiply; on one shape, opacity multiplies fill-opacity and stroke-opacity.
+	- Added SVG lengths in percentages, as shares of the viewport: its width, its height or its normalised diagonal.
+	- Added SVG text in clip paths, clipping with its glyphs.
+	- Fixed: an SVG clip path with a transform moved the content it clips; clip-rule is read from the clipPath element; a use in a clip path clips with the shape or text it uses; anything else in a clip path, such as a group, adds nothing to it; an empty clip path hides what it clips.
+	- Fixed: an SVG use element applies its transform, then its x and y, then the element's own transform, and draws like a group around the element it uses.
+	- Fixed: the size, viewBox and preserveAspectRatio of the SVG root element are read in single quotes too, and its presentation attributes are inherited.
+	- Fixed: SVG bounding-box linear gradients read plain fractions, href is read without the xlink prefix, and a fill or stroke referencing nothing paints its fallback.
+
+6.11.3.1 (2026-11-09)
 	- Added setPdfaFontSubsetting() to allow font subsetting in PDF/A-2 and PDF/A-3 mode.
 	- Added setTCPDFLink() to disable the hidden meta link or set a custom text and URL.
 	- Fixed: disabling the meta link skipped the last page footer when the current page was not the last one.

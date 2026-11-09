@@ -240,6 +240,22 @@ if [ $? -gt 0 ]; then
     echo "File-run-failed: tests/glyph_fallback.php"
 fi
 
+echo "File: tests/svg_rendering.php"
+${PHP_BINARY} -n \
+    -d date.timezone=UTC \
+    ${BCMATH_EXT} \
+    ${CURL_EXT} \
+    ${JSON_EXT} \
+    ${XML_EXT} \
+    -d display_errors=on \
+    -d error_reporting=-1 \
+    -d memory_limit=1G \
+    "${TESTS_DIR}/svg_rendering.php"
+if [ $? -gt 0 ]; then
+    FAILED_FLAG=1
+    echo "File-run-failed: tests/svg_rendering.php"
+fi
+
 echo "File: tests/pdfa_font_subsetting.php"
 ${PHP_BINARY} -n \
     -d date.timezone=UTC \

@@ -1,7 +1,7 @@
 <?php
 //============================================================+
 // File name   : tcpdf.php
-// Version     : 6.11.3
+// Version     : 6.11.3.2
 // Begin       : 2002-08-03
 // Last Update : 2026-03-03
 // Author      : Nicola Asuni - Tecnick.com LTD - www.tecnick.com - info@tecnick.com
@@ -104,7 +104,7 @@
  * Tools to encode your unicode fonts are on fonts/utils directory.</p>
  * @package com.tecnick.tcpdf
  * @author Nicola Asuni
- * @version 6.11.3
+ * @version 6.11.3.2
  */
 
 // TCPDF configuration
@@ -128,7 +128,7 @@ require_once(dirname(__FILE__).'/include/tcpdf_static.php');
  * TCPDF project (http://www.tcpdf.org) has been originally derived in 2002 from the Public Domain FPDF class by Olivier Plathey (http://www.fpdf.org), but now is almost entirely rewritten.<br>
  * @package com.tecnick.tcpdf
  * @brief PHP class for generating PDF documents without requiring external extensions.
- * @version 6.11.3
+ * @version 6.11.3.2
  * @author Nicola Asuni - info@tecnick.com
  * @IgnoreAnnotation("protected")
  * @IgnoreAnnotation("public")
@@ -1689,6 +1689,98 @@ class TCPDF {
 	 * @since 5.8.013 (2010-08-23)
 	 */
 	protected $svgtextmode = array();
+
+	/**
+	 * SVG patterns by id: the attributes of the pattern element and the events of its content.
+	 * @protected
+	 */
+	protected $svgpatterns = array();
+
+	/**
+	 * The SVG pattern whose content is being recorded: its id and how deep inside it the parser is.
+	 * @protected
+	 */
+	protected $svgpatternrecord = array();
+
+	/**
+	 * Ids of the SVG patterns whose tiles are being drawn, innermost last.
+	 * @protected
+	 */
+	protected $svgpatternstack = array();
+
+	/**
+	 * XObject ids of the SVG pattern tiles drawn so far, by pattern and tile geometry.
+	 * @protected
+	 */
+	protected $svgpatterntiles = array();
+
+	/**
+	 * Style of each SVG clipPath element where it is defined, inherited by the elements inside it.
+	 * @protected
+	 */
+	protected $svgclipstyles = array();
+
+	/**
+	 * Width and height of the current SVG viewport, in user units, for lengths in percentages.
+	 * @protected
+	 */
+	protected $svgviewport = array(0, 0);
+
+	/**
+	 * The SVG viewports around the current one, outermost first.
+	 * @protected
+	 */
+	protected $svgviewports = array();
+
+	/**
+	 * Shapes drawn so far into the SVG clip path being set: one with none hides what it clips.
+	 * @protected
+	 */
+	protected $svgclipshapes = 0;
+
+	/**
+	 * How deep the parser is inside an element of an SVG clip path that cannot clip, such as a group.
+	 * @protected
+	 */
+	protected $svgclipskip = 0;
+
+	/**
+	 * Positions, in the clip path being recorded, of the text elements still open, innermost last.
+	 * @protected
+	 */
+	protected $svgcliptexts = array();
+
+	/**
+	 * Characters of the text element of a clip path being drawn.
+	 * @protected
+	 */
+	protected $svgcliptext = '';
+
+	/**
+	 * The SVG groups with an opacity being drawn into transparency groups, innermost last: the XObject, the
+	 * depth of the style stack the group opened at, and what to restore when it ends.
+	 * @protected
+	 */
+	protected $svggroupstack = array();
+
+	/**
+	 * Rules of the SVG style elements: 'rules' in cascade order, and an 'index' of their positions by the id,
+	 * class or type the last compound selector requires ('*' when it requires none).
+	 * @protected
+	 */
+	protected $svgcssrules = array();
+
+	/**
+	 * The SVG elements open around the one being parsed, outermost first: name, id and classes.
+	 * @protected
+	 */
+	protected $svgancestors = array();
+
+	/**
+	 * Most pattern tiles one SVG fill may lay; a fill that needs more paints its fallback instead.
+	 * @protected
+	 */
+	protected $svg_pattern_tile_limit = 10000;
 
 	/**
 	 * Array of SVG properties.
@@ -22915,39 +23007,21 @@ class TCPDF {
 			// we are already inside an XObject template
 			return false;
 		}
-		$this->inxobj = true;
-		++$this->n;
-		// XObject ID
-		$this->xobjid = 'XT'.$this->n;
-		// object ID
-		$this->xobjects[$this->xobjid] = array('n' => $this->n);
-		// store current graphic state
-		$this->xobjects[$this->xobjid]['gvars'] = $this->getGraphicVars();
-		// initialize data
-		$this->xobjects[$this->xobjid]['intmrk'] = 0;
-		$this->xobjects[$this->xobjid]['transfmrk'] = array();
-		$this->xobjects[$this->xobjid]['outdata'] = '';
-		$this->xobjects[$this->xobjid]['xobjects'] = array();
-		$this->xobjects[$this->xobjid]['images'] = array();
-		$this->xobjects[$this->xobjid]['fonts'] = array();
-		$this->xobjects[$this->xobjid]['annotations'] = array();
-		$this->xobjects[$this->xobjid]['extgstates'] = array();
-		$this->xobjects[$this->xobjid]['gradients'] = array();
-		$this->xobjects[$this->xobjid]['spot_colors'] = array();
-		// set new environment
-		$this->num_columns = 1;
-		$this->current_column = 0;
-		$this->setAutoPageBreak(false);
 		if (($w === '') OR ($w <= 0)) {
 			$w = $this->w - $this->lMargin - $this->rMargin;
 		}
 		if (($h === '') OR ($h <= 0)) {
 			$h = $this->h - $this->tMargin - $this->bMargin;
 		}
-		$this->xobjects[$this->xobjid]['x'] = 0;
-		$this->xobjects[$this->xobjid]['y'] = 0;
-		$this->xobjects[$this->xobjid]['w'] = $w;
-		$this->xobjects[$this->xobjid]['h'] = $h;
+		$this->inxobj = true;
+		// XObject ID
+		$this->xobjid = $this->newXObject(0, 0, $w, $h, $group);
+		// store current graphic state
+		$this->xobjects[$this->xobjid]['gvars'] = $this->getGraphicVars();
+		// set new environment
+		$this->num_columns = 1;
+		$this->current_column = 0;
+		$this->setAutoPageBreak(false);
 		$this->w = $w;
 		$this->h = $h;
 		$this->wPt = $this->w * $this->k;
@@ -22960,9 +23034,41 @@ class TCPDF {
 		$this->rMargin = 0;
 		$this->tMargin = 0;
 		$this->bMargin = 0;
-		// set group mode
-		$this->xobjects[$this->xobjid]['group'] = $group;
 		return $this->xobjid;
+	}
+
+	/**
+	 * Start the data of a new XObject: its object number, its bounding box and empty content and resources.
+	 * @param float $x abscissa of the bounding box
+	 * @param float $y ordinate of the bounding box
+	 * @param float $w width of the bounding box
+	 * @param float $h height of the bounding box
+	 * @param mixed $group false, or the transparency group the XObject forms (see startTemplate())
+	 * @return string XObject ID
+	 * @protected
+	 */
+	protected function newXObject($x, $y, $w, $h, $group) {
+		++$this->n;
+		$id = 'XT'.$this->n;
+		$this->xobjects[$id] = array(
+			'n' => $this->n,
+			'intmrk' => 0,
+			'transfmrk' => array(),
+			'outdata' => '',
+			'xobjects' => array(),
+			'images' => array(),
+			'fonts' => array(),
+			'annotations' => array(),
+			'extgstates' => array(),
+			'gradients' => array(),
+			'spot_colors' => array(),
+			'x' => $x,
+			'y' => $y,
+			'w' => $w,
+			'h' => $h,
+			'group' => $group
+		);
+		return $id;
 	}
 
 	/**
@@ -23372,6 +23478,17 @@ class TCPDF {
 		$this->svgclipid = 0;
 		$this->svgtext = '';
 		$this->svgtextmode = array();
+		$this->svgpatterns = array();
+		$this->svgpatternrecord = array();
+		$this->svgpatternstack = array();
+		$this->svgpatterntiles = array();
+		$this->svgclipstyles = array();
+		$this->svggroupstack = array();
+		$this->svgviewports = array();
+		$this->svgcssrules = array();
+		$this->svgancestors = array();
+		$this->svgstyles = array($this->svgstyles[0]);
+		$this->svg_tag_depth = 0;
 		if ($this->rasterize_vector_images AND ($w > 0) AND ($h > 0)) {
 			// convert SVG to raster image using GD or ImageMagick libraries
 			return $this->Image($file, $x, $y, $w, $h, 'SVG', $link, $align, true, 300, $palign, false, false, $border, false, false, false);
@@ -23386,6 +23503,7 @@ class TCPDF {
 		if ($svgdata === FALSE) {
 			$this->Error('SVG file not found: '.$file);
 		}
+		$this->svgcssrules = $this->getSVGStyleRules($svgdata);
 		if (TCPDF_STATIC::empty_string($x)) {
 			$x = $this->x;
 		}
@@ -23399,61 +23517,33 @@ class TCPDF {
 		$oy = 0;
 		$ow = $w;
 		$oh = $h;
-		$aspect_ratio_align = 'xMidYMid';
-		$aspect_ratio_ms = 'meet';
+		$aspect_ratio = '';
 		$regs = array();
 		// get original image width and height
 		preg_match('/<svg([^\>]*)>/si', $svgdata, $regs);
 		if (isset($regs[1]) AND !empty($regs[1])) {
-			$tmp = array();
-			if (preg_match('/[\s]+x[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$ox = $this->getHTMLUnitToUnits($tmp[1], 0, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'x')) !== null) {
+				$ox = $this->getHTMLUnitToUnits($value, 0, $this->svgunit, false);
 			}
-			$tmp = array();
-			if (preg_match('/[\s]+y[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$oy = $this->getHTMLUnitToUnits($tmp[1], 0, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'y')) !== null) {
+				$oy = $this->getHTMLUnitToUnits($value, 0, $this->svgunit, false);
 			}
-			$tmp = array();
-			if (preg_match('/[\s]+width[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$ow = $this->getHTMLUnitToUnits($tmp[1], 1, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'width')) !== null) {
+				$ow = $this->getHTMLUnitToUnits($value, 1, $this->svgunit, false);
 			}
-			$tmp = array();
-			if (preg_match('/[\s]+height[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-				$oh = $this->getHTMLUnitToUnits($tmp[1], 1, $this->svgunit, false);
+			if (($value = $this->getSVGRootAttribute($regs[1], 'height')) !== null) {
+				$oh = $this->getHTMLUnitToUnits($value, 1, $this->svgunit, false);
 			}
-			$tmp = array();
 			$view_box = array();
-			if (preg_match('/[\s]+viewBox[\s]*=[\s]*"[\s]*([0-9\.\-]+)[\s]+([0-9\.\-]+)[\s]+([0-9\.]+)[\s]+([0-9\.]+)[\s]*"/si', $regs[1], $tmp)) {
-				if (count($tmp) == 5) {
-					array_shift($tmp);
-					foreach ($tmp as $key => $val) {
-						$view_box[$key] = $this->getHTMLUnitToUnits($val, 0, $this->svgunit, false);
-					}
-					$ox = $view_box[0];
-					$oy = $view_box[1];
+			$tmp = preg_split('/[\s,]+/', trim((string) $this->getSVGRootAttribute($regs[1], 'viewBox')));
+			if ((count($tmp) == 4) AND is_numeric($tmp[0]) AND is_numeric($tmp[1]) AND is_numeric($tmp[2]) AND is_numeric($tmp[3]) AND ($tmp[2] >= 0) AND ($tmp[3] >= 0)) {
+				foreach ($tmp as $key => $val) {
+					$view_box[$key] = $this->getHTMLUnitToUnits($val, 0, $this->svgunit, false);
 				}
+				$ox = $view_box[0];
+				$oy = $view_box[1];
 				// get aspect ratio
-				$tmp = array();
-				if (preg_match('/[\s]+preserveAspectRatio[\s]*=[\s]*"([^"]*)"/si', $regs[1], $tmp)) {
-					$aspect_ratio = preg_split('/[\s]+/si', $tmp[1]);
-					switch (count($aspect_ratio)) {
-						case 3: {
-							$aspect_ratio_align = $aspect_ratio[1];
-							$aspect_ratio_ms = $aspect_ratio[2];
-							break;
-						}
-						case 2: {
-							$aspect_ratio_align = $aspect_ratio[0];
-							$aspect_ratio_ms = $aspect_ratio[1];
-							break;
-						}
-						case 1: {
-							$aspect_ratio_align = $aspect_ratio[0];
-							$aspect_ratio_ms = 'meet';
-							break;
-						}
-					}
-				}
+				$aspect_ratio = (string) $this->getSVGRootAttribute($regs[1], 'preserveAspectRatio');
 			}
 		}
 		if ($ow <= 0) {
@@ -23520,62 +23610,11 @@ class TCPDF {
 				$oh = $h;
 			}
 		}
-		$svgscale_x = $w / $ow;
-		$svgscale_y = $h / $oh;
+		$this->svgviewport = array($ow, $oh);
 		// scaling and alignment
-		if ($aspect_ratio_align != 'none') {
-			// store current scaling values
-			$svgscale_old_x = $svgscale_x;
-			$svgscale_old_y = $svgscale_y;
-			// force uniform scaling
-			if ($aspect_ratio_ms == 'slice') {
-				// the entire viewport is covered by the viewBox
-				if ($svgscale_x > $svgscale_y) {
-					$svgscale_y = $svgscale_x;
-				} elseif ($svgscale_x < $svgscale_y) {
-					$svgscale_x = $svgscale_y;
-				}
-			} else { // meet
-				// the entire viewBox is visible within the viewport
-				if ($svgscale_x < $svgscale_y) {
-					$svgscale_y = $svgscale_x;
-				} elseif ($svgscale_x > $svgscale_y) {
-					$svgscale_x = $svgscale_y;
-				}
-			}
-			// correct X alignment
-			switch (substr($aspect_ratio_align, 1, 3)) {
-				case 'Min': {
-					// do nothing
-					break;
-				}
-				case 'Max': {
-					$svgoffset_x += (($w * $this->k) - ($ow * $this->k * $svgscale_x));
-					break;
-				}
-				default:
-				case 'Mid': {
-					$svgoffset_x += ((($w * $this->k) - ($ow * $this->k * $svgscale_x)) / 2);
-					break;
-				}
-			}
-			// correct Y alignment
-			switch (substr($aspect_ratio_align, 5)) {
-				case 'Min': {
-					// do nothing
-					break;
-				}
-				case 'Max': {
-					$svgoffset_y -= (($h * $this->k) - ($oh * $this->k * $svgscale_y));
-					break;
-				}
-				default:
-				case 'Mid': {
-					$svgoffset_y -= ((($h * $this->k) - ($oh * $this->k * $svgscale_y)) / 2);
-					break;
-				}
-			}
-		}
+		list($svgscale_x, $svgscale_y, $fit_x, $fit_y) = $this->getSVGViewBoxFit($ow, $oh, $w, $h, $aspect_ratio);
+		$svgoffset_x += ($fit_x * $this->k);
+		$svgoffset_y -= ($fit_y * $this->k);
 		// store current page break mode
 		$page_break_mode = $this->AutoPageBreak;
 		$page_break_margin = $this->getBreakMargin();
@@ -23599,11 +23638,22 @@ class TCPDF {
 		// sets the character data handler function for the XML parser
 		xml_set_character_data_handler($parser, [$this, 'segSVGContentHandler']);
 		// start parsing an XML document
-		if (!xml_parse($parser, $svgdata)) {
-			$error_message = sprintf('SVG Error: %s at line %d', xml_error_string(xml_get_error_code($parser)), xml_get_current_line_number($parser));
-			$this->Error($error_message);
+		try {
+			if (!xml_parse($parser, $svgdata)) {
+				$error_message = sprintf('SVG Error: %s at line %d', xml_error_string(xml_get_error_code($parser)), xml_get_current_line_number($parser));
+				$this->Error($error_message);
+			}
+		} finally {
+			if (!empty($this->svggroupstack)) {
+				// a group left open by an error: what follows is drawn where the SVG started
+				$group = reset($this->svggroupstack);
+				$this->inxobj = $group['inxobj'];
+				$this->xobjid = $group['xobjid'];
+				$this->alpha = $group['alpha'];
+				$this->svggroupstack = array();
+			}
 		}
-		
+
 		// free this XML parser (does nothing in PHP >= 8.0)
 		if (function_exists('xml_parser_free') && PHP_VERSION_ID < 80000) {
 		    xml_parser_free($parser);
@@ -23708,6 +23758,893 @@ class TCPDF {
 	}
 
 	/**
+	 * An attribute of the root svg element, quoted with double or single quotes.
+	 * @param string $tag attributes of the root svg element
+	 * @param string $name attribute name
+	 * @return string|null null when the attribute is missing
+	 * @protected
+	 */
+	protected function getSVGRootAttribute($tag, $name) {
+		$regs = array();
+		if (preg_match('/[\s]+'.preg_quote($name, '/').'[\s]*=[\s]*(["\'])(.*?)\1/si', $tag, $regs)) {
+			return $regs[2];
+		}
+		return null;
+	}
+
+	/**
+	 * Undo an SVG graphic transformation applied with SVGTransform(). A clipping path set in between stays.
+	 * @param array $tm original SVG transformation matrix
+	 * @protected
+	 */
+	protected function SVGTransformInverse($tm) {
+		list($a, $b, $c, $d, $e, $f) = $this->convertSVGtMatrix($tm);
+		$det = ($a * $d) - ($b * $c);
+		if ($det == 0) {
+			return;
+		}
+		$this->Transform(array(($d / $det), (-$b / $det), (-$c / $det), ($a / $det), ((($c * $f) - ($d * $e)) / $det), ((($b * $e) - ($a * $f)) / $det)));
+	}
+
+	/**
+	 * Apply an SVG graphic transformation matrix whose translation is in user units instead of SVG units.
+	 * @param array $tm transformation matrix
+	 * @protected
+	 */
+	protected function SVGUserTransform($tm) {
+		$unit = $this->getSVGUnitScale();
+		$this->SVGTransform(array($tm[0], $tm[1], $tm[2], $tm[3], ($tm[4] / $unit), ($tm[5] / $unit)));
+	}
+
+	/**
+	 * User units in one SVG unit.
+	 * @return float
+	 * @protected
+	 */
+	protected function getSVGUnitScale() {
+		return $this->getHTMLUnitToUnits(1, 0, $this->svgunit, false);
+	}
+
+	/**
+	 * An SVG length in user units. A percentage is a share of the current viewport: of its width for a
+	 * horizontal length, of its height for a vertical one, and of its normalised diagonal for any other.
+	 * @param string $value length
+	 * @param string $axis 'x', 'y', or 'd' for the diagonal
+	 * @return float
+	 * @protected
+	 */
+	protected function getSVGLength($value, $axis) {
+		$refsize = 0;
+		if (substr(trim((string) $value), -1) == '%') {
+			if ($axis == 'x') {
+				$refsize = $this->svgviewport[0];
+			} elseif ($axis == 'y') {
+				$refsize = $this->svgviewport[1];
+			} else {
+				$refsize = sqrt(((pow($this->svgviewport[0], 2) + pow($this->svgviewport[1], 2)) / 2));
+			}
+		}
+		return $this->getHTMLUnitToUnits($value, $refsize, $this->svgunit, false);
+	}
+
+	/**
+	 * Set the most pattern tiles one SVG fill may lay. A fill that needs more paints its fallback colour instead.
+	 * @param int $limit number of tiles
+	 * @public
+	 */
+	public function setSVGPatternTileLimit($limit) {
+		$this->svg_pattern_tile_limit = max(1, intval($limit));
+	}
+
+	/**
+	 * An SVG opacity, plain or as a percentage, between 0 and 1.
+	 * @param mixed $value opacity
+	 * @return float
+	 * @protected
+	 */
+	protected function getSVGOpacity($value) {
+		$value = trim((string) $value);
+		$opacity = (substr($value, -1) == '%') ? (floatval(substr($value, 0, -1)) / 100) : floatval($value);
+		return max(0, min(1, $opacity));
+	}
+
+	/**
+	 * An SVG attribute in fractions of a bounding box, plain or as a percentage.
+	 * @param array $attribs element attributes
+	 * @param string $key attribute name
+	 * @param float $default value when the attribute is missing
+	 * @return float
+	 * @protected
+	 */
+	protected function getSVGFraction($attribs, $key, $default) {
+		if (!isset($attribs[$key]) OR (trim($attribs[$key]) === '')) {
+			return $default;
+		}
+		$value = trim($attribs[$key]);
+		return (substr($value, -1) == '%') ? (floatval(substr($value, 0, -1)) / 100) : floatval($value);
+	}
+
+	/**
+	 * What an SVG fill or stroke paints.
+	 * @param string $paint value of the fill or stroke property
+	 * @param array $svgstyle style of the element, for currentColor
+	 * @return array 'type' is none, color (with the 'color'), gradient or pattern (with the 'id' and the 'fallback' paint)
+	 * @protected
+	 */
+	protected function getSVGPaint($paint, $svgstyle) {
+		$paint = trim((string) $paint);
+		$regs = array();
+		if (preg_match('/^url\([\s]*[\'"]?\#([^\'"\)\s]+)[\'"]?[\s]*\)[\s]*(.*)$/si', $paint, $regs)) {
+			$fallback = trim($regs[2]);
+			if ($this->getSVGGradient($regs[1]) !== null) {
+				return array('type' => 'gradient', 'id' => $regs[1], 'fallback' => $fallback);
+			}
+			if (isset($this->svgpatterns[$regs[1]]) AND !in_array($regs[1], $this->svgpatternstack)) {
+				return array('type' => 'pattern', 'id' => $regs[1], 'fallback' => $fallback);
+			}
+			// a reference to nothing paints its fallback
+			$paint = $fallback;
+		}
+		if (($paint === '') OR in_array(strtolower($paint), array('none', 'transparent')) OR (strtolower(substr($paint, 0, 4)) == 'url(')) {
+			return array('type' => 'none');
+		}
+		if (strtolower($paint) == 'currentcolor') {
+			$paint = $svgstyle['color'];
+		}
+		return array('type' => 'color', 'color' => $paint);
+	}
+
+	/**
+	 * An SVG gradient, with the stops of the gradient it references when it has none of its own.
+	 * @param string $id gradient id
+	 * @param int $depth references followed so far
+	 * @return array|null null when there is no gradient with that id
+	 * @protected
+	 */
+	protected function getSVGGradient($id, $depth=0) {
+		if (!isset($this->svggradients[$id]) OR ($depth > 8)) {
+			return null;
+		}
+		$gradient = $this->svggradients[$id];
+		if (!isset($gradient['stops']) OR !is_array($gradient['stops'])) {
+			$gradient['stops'] = array();
+		}
+		if (isset($gradient['xref'])) {
+			$referenced = $this->getSVGGradient($gradient['xref'], ($depth + 1));
+			if (($referenced !== null) AND empty($gradient['stops'])) {
+				$gradient['stops'] = $referenced['stops'];
+			}
+			unset($gradient['xref']);
+		}
+		return $gradient;
+	}
+
+	/**
+	 * An SVG pattern, with the attributes and content it takes from the patterns it references.
+	 * @param string $id pattern id
+	 * @return array 'attribs', 'children' (the recorded element events of the content) and 'style' (that of the
+	 * pattern element holding the content, which the content inherits)
+	 * @protected
+	 */
+	protected function getSVGPattern($id) {
+		$pattern = array('attribs' => array(), 'children' => array(), 'style' => $this->svgstyles[0]);
+		$seen = array();
+		while (isset($this->svgpatterns[$id]) AND !isset($seen[$id])) {
+			$seen[$id] = true;
+			$current = $this->svgpatterns[$id];
+			$pattern['attribs'] = array_merge($current['attribs'], $pattern['attribs']);
+			if (!$this->hasSVGPatternContent($pattern['children'])) {
+				$pattern['children'] = $current['children'];
+				$pattern['style'] = $current['style'];
+			}
+			if (empty($current['attribs']['xlink:href'])) {
+				break;
+			}
+			$id = substr(trim($current['attribs']['xlink:href']), 1);
+		}
+		return $pattern;
+	}
+
+	/**
+	 * Whether recorded pattern content holds an element.
+	 * @param array $children recorded element events
+	 * @return bool
+	 * @protected
+	 */
+	protected function hasSVGPatternContent($children) {
+		foreach ($children as $event) {
+			if ($event[0] == 'start') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * How a viewBox fits a viewport, as preserveAspectRatio says: its scale and the offset of the scaled viewBox.
+	 * @param float $vw viewBox width
+	 * @param float $vh viewBox height
+	 * @param float $w viewport width
+	 * @param float $h viewport height
+	 * @param string $aspect_ratio value of preserveAspectRatio, empty for the default xMidYMid meet
+	 * @return array horizontal scale, vertical scale, horizontal offset, vertical offset
+	 * @protected
+	 */
+	protected function getSVGViewBoxFit($vw, $vh, $w, $h, $aspect_ratio) {
+		$sx = $w / $vw;
+		$sy = $h / $vh;
+		$aspect_ratio = preg_split('/[\s]+/', trim((string) $aspect_ratio));
+		if ($aspect_ratio[0] == 'defer') {
+			array_shift($aspect_ratio);
+		}
+		$align = !empty($aspect_ratio[0]) ? $aspect_ratio[0] : 'xMidYMid';
+		if ($align == 'none') {
+			return array($sx, $sy, 0, 0);
+		}
+		$scale = (isset($aspect_ratio[1]) AND ($aspect_ratio[1] == 'slice')) ? max($sx, $sy) : min($sx, $sy);
+		$position = array('Min' => 0, 'Mid' => 0.5, 'Max' => 1);
+		$fx = isset($position[substr($align, 1, 3)]) ? $position[substr($align, 1, 3)] : 0.5;
+		$fy = isset($position[substr($align, 5, 3)]) ? $position[substr($align, 5, 3)] : 0.5;
+		return array($scale, $scale, (($w - ($vw * $scale)) * $fx), (($h - ($vh * $scale)) * $fy));
+	}
+
+	/**
+	 * The solid paint drawn where a gradient or pattern paint cannot be: a gradient's first stop, with its
+	 * opacity, or a pattern's fallback.
+	 * @param array $paint paint, as getSVGPaint() returns it
+	 * @param array $svgstyle style of the element, for currentColor
+	 * @return array paint of type none or color; a color may carry an 'opacity'
+	 * @protected
+	 */
+	protected function getSVGSolidPaint($paint, $svgstyle) {
+		if ($paint['type'] == 'gradient') {
+			$gradient = $this->getSVGGradient($paint['id']);
+			if (empty($gradient['stops'])) {
+				return array('type' => 'none');
+			}
+			return array('type' => 'color', 'color' => $gradient['stops'][0]['color'], 'opacity' => $gradient['stops'][0]['opacity']);
+		}
+		if ($paint['type'] == 'pattern') {
+			return $this->getSVGPaint($paint['fallback'], $svgstyle);
+		}
+		return $paint;
+	}
+
+	/**
+	 * Add the glyphs of a text element of an SVG clip path to the clipping path, as text rendering mode 7 does.
+	 * A clip path cannot be drawn inside a saved graphics state, so the text's transformation is undone after it.
+	 * @param string $name element name, text or tspan
+	 * @param float $x abscissa of the text
+	 * @param float $y ordinate of the text
+	 * @param array $tm transformation matrix of the text
+	 * @param array $svgstyle style of the text
+	 * @param array $prevsvgstyle style of its parent
+	 * @protected
+	 */
+	protected function SVGClipText($name, $x, $y, $tm, $svgstyle, $prevsvgstyle) {
+		$this->x = $x;
+		$this->y = $y;
+		$text = $this->svgcliptext;
+		if ($text === '') {
+			return;
+		}
+		$this->SVGTransform($tm);
+		$this->setSVGFont($svgstyle, $prevsvgstyle);
+		$textlen = $this->GetStringWidth($text);
+		$rtl = (isset($svgstyle['direction']) AND ($svgstyle['direction'] == 'rtl'));
+		if ($svgstyle['text-anchor'] == 'end') {
+			$this->x += ($rtl ? $textlen : -$textlen);
+		} elseif ($svgstyle['text-anchor'] == 'middle') {
+			$this->x += ($rtl ? ($textlen / 2) : -($textlen / 2));
+		}
+		$textrendermode = $this->textrendermode;
+		$textstrokewidth = $this->textstrokewidth;
+		$this->setTextRenderingMode(0, false, true);
+		$this->Cell($textlen, 0, $text, 0, 0, '', false, '', 0, false, 'L', 'T');
+		$this->textrendermode = $textrendermode;
+		$this->textstrokewidth = $textstrokewidth;
+		if ($name == 'text') {
+			$this->x = $x;
+			$this->y = $y;
+		}
+		$this->SVGTransformInverse($tm);
+		++$this->svgclipshapes;
+	}
+
+	/**
+	 * Start drawing an SVG group with an opacity below 1 into a transparency group XObject of its own, laid at
+	 * that opacity when the group ends, so the opacity applies to the group as a whole and multiplies the
+	 * opacity of what it holds. The XObject keeps the coordinates of the page; its bounding box is large enough
+	 * for any content, which is clipped where it is laid.
+	 * @param mixed $opacity opacity of the group
+	 * @param int|null $depth depth of the style stack the group belongs to, the current one when null; a shape,
+	 * which pushes no style, takes the depth after the current one
+	 * @protected
+	 */
+	protected function startSVGOpacityGroup($opacity, $depth=null) {
+		$opacity = $this->getSVGOpacity($opacity);
+		if (($opacity >= 1) OR ($this->pdfa_mode AND ($this->pdfa_version < 2))) {
+			return;
+		}
+		// the group is laid at its opacity alone, whatever its own fill set
+		$this->setAlpha($opacity, 'Normal', $opacity, false);
+		$size = 1000000 / $this->k;
+		$this->svggroupstack[] = array(
+			'id' => $this->newXObject(-$size, $size, (2 * $size), (2 * $size), true),
+			'depth' => ($depth === null) ? count($this->svgstyles) : $depth,
+			'inxobj' => $this->inxobj,
+			'xobjid' => $this->xobjid,
+			'alpha' => $this->alpha
+		);
+		$this->inxobj = true;
+		$this->xobjid = $this->svggroupstack[(count($this->svggroupstack) - 1)]['id'];
+		// a transparency group starts opaque
+		$this->alpha = array('CA' => 1, 'ca' => 1, 'BM' => '/Normal', 'AIS' => false);
+	}
+
+	/**
+	 * End the transparency group startSVGOpacityGroup() opened at a depth of the style stack, if any, and lay it.
+	 * @param int|null $depth depth of the style stack, the current one when null
+	 * @protected
+	 */
+	protected function endSVGOpacityGroup($depth=null) {
+		$group = end($this->svggroupstack);
+		if (($group === false) OR ($group['depth'] != (($depth === null) ? count($this->svgstyles) : $depth))) {
+			return;
+		}
+		array_pop($this->svggroupstack);
+		$this->inxobj = $group['inxobj'];
+		$this->xobjid = $group['xobjid'];
+		$this->alpha = $group['alpha'];
+		if ($this->inxobj) {
+			$this->xobjects[$this->xobjid]['xobjects'][$group['id']] = $this->xobjects[$group['id']];
+		}
+		$this->_out('/'.$group['id'].' Do');
+	}
+
+	/**
+	 * Matrix from the content of an SVG pattern to its tile, with its translation in user units.
+	 * @param array $attribs pattern attributes
+	 * @param float $tw tile width
+	 * @param float $th tile height
+	 * @param float $w width of the bounding box of the filled shape
+	 * @param float $h height of the bounding box of the filled shape
+	 * @return array transformation matrix
+	 * @protected
+	 */
+	protected function getSVGPatternContentMatrix($attribs, $tw, $th, $w, $h) {
+		$unit = $this->getSVGUnitScale();
+		$view_box = isset($attribs['viewBox']) ? preg_split('/[\s,]+/', trim($attribs['viewBox'])) : array();
+		if ((count($view_box) == 4) AND (floatval($view_box[2]) > 0) AND (floatval($view_box[3]) > 0)) {
+			list($vx, $vy, $vw, $vh) = array_map('floatval', $view_box);
+			$aspect_ratio = isset($attribs['preserveAspectRatio']) ? $attribs['preserveAspectRatio'] : '';
+			list($sx, $sy, $ox, $oy) = $this->getSVGViewBoxFit(($vw * $unit), ($vh * $unit), $tw, $th, $aspect_ratio);
+			return array($sx, 0, 0, $sy, ($ox - ($vx * $unit * $sx)), ($oy - ($vy * $unit * $sy)));
+		}
+		if (isset($attribs['patternContentUnits']) AND ($attribs['patternContentUnits'] == 'objectBoundingBox')) {
+			return array(($w / $unit), 0, 0, ($h / $unit), 0, 0);
+		}
+		return array(1, 0, 0, 1, 0, 0);
+	}
+
+	/**
+	 * Fill a shape with an SVG pattern: clip to the shape and lay the pattern tile over it. The tile is drawn
+	 * once, as an XObject, and laid as many times as it takes to cover the shape.
+	 * @param string $id pattern id
+	 * @param float $x abscissa of the bounding box of the shape
+	 * @param float $y ordinate of the bounding box of the shape
+	 * @param float $w width of the bounding box of the shape
+	 * @param float $h height of the bounding box of the shape
+	 * @param string $clip_function method that draws the shape
+	 * @param array $clip_params parameters of the clip function, drawing the shape as a clipping path
+	 * @param float $opacity fill opacity
+	 * @return bool false, with nothing drawn, when the shape takes more tiles than the limit and the fill falls back
+	 * @protected
+	 */
+	protected function SVGPatternFill($id, $x, $y, $w, $h, $clip_function, $clip_params, $opacity) {
+		$pattern = $this->getSVGPattern($id);
+		$attribs = $pattern['attribs'];
+		$this->StartTransform();
+		$bbox = call_user_func_array(array($this, $clip_function), $clip_params);
+		if (is_array($bbox) AND (count($bbox) == 4)) {
+			list($x, $y, $w, $h) = $bbox;
+		}
+		if (isset($attribs['patternUnits']) AND ($attribs['patternUnits'] == 'userSpaceOnUse')) {
+			$tx = isset($attribs['x']) ? $this->getSVGLength($attribs['x'], 'x') : 0;
+			$ty = isset($attribs['y']) ? $this->getSVGLength($attribs['y'], 'y') : 0;
+			$tw = isset($attribs['width']) ? $this->getSVGLength($attribs['width'], 'x') : 0;
+			$th = isset($attribs['height']) ? $this->getSVGLength($attribs['height'], 'y') : 0;
+		} else {
+			$tx = $x + ($this->getSVGFraction($attribs, 'x', 0) * $w);
+			$ty = $y + ($this->getSVGFraction($attribs, 'y', 0) * $h);
+			$tw = $this->getSVGFraction($attribs, 'width', 0) * $w;
+			$th = $this->getSVGFraction($attribs, 'height', 0) * $h;
+		}
+		$ptm = !empty($attribs['patternTransform']) ? TCPDF_STATIC::getSVGTransformMatrix($attribs['patternTransform']) : array(1, 0, 0, 1, 0, 0);
+		$det = ($ptm[0] * $ptm[3]) - ($ptm[1] * $ptm[2]);
+		if (($tw <= 0) OR ($th <= 0) OR ($det == 0) OR !$this->hasSVGPatternContent($pattern['children'])) {
+			// an empty tile paints nothing
+			$this->StopTransform();
+			return true;
+		}
+		// the tiles that cover the bounding box, in pattern space; a tile that only touches its far edge is left out
+		$unit = $this->getSVGUnitScale();
+		$columns = array();
+		$rows = array();
+		foreach (array(array($x, $y), array(($x + $w), $y), array($x, ($y + $h)), array(($x + $w), ($y + $h))) as $corner) {
+			$cx = $corner[0] - ($ptm[4] * $unit);
+			$cy = $corner[1] - ($ptm[5] * $unit);
+			$columns[] = ((($ptm[3] * $cx) - ($ptm[2] * $cy)) / $det - $tx) / $tw;
+			$rows[] = ((($ptm[0] * $cy) - ($ptm[1] * $cx)) / $det - $ty) / $th;
+		}
+		$imin = floor(min($columns) + 1e-9);
+		$imax = ceil(max($columns) - 1e-9) - 1;
+		$jmin = floor(min($rows) + 1e-9);
+		$jmax = ceil(max($rows) - 1e-9) - 1;
+		$tiles = ($imax - $imin + 1) * ($jmax - $jmin + 1);
+		if (!is_finite($tiles) OR ($tiles > $this->svg_pattern_tile_limit)) {
+			$this->StopTransform();
+			return false;
+		}
+		if ($tiles < 1) {
+			// a shape without area shows no tile
+			$this->StopTransform();
+			return true;
+		}
+		// with an opacity of its own the fill lays its tile as a group, so the opacity inside the tile multiplies it
+		$group = (($opacity != 1) AND !($this->pdfa_mode AND ($this->pdfa_version < 2)));
+		$content_matrix = $this->getSVGPatternContentMatrix($attribs, $tw, $th, $w, $h);
+		$key = serialize(array($id, $tx, $ty, $tw, $th, $content_matrix, $group, $this->svgpatternstack));
+		if (isset($this->svgpatterntiles[$key])) {
+			$tile = $this->svgpatterntiles[$key];
+		} else {
+			// draw the tile once, into an XObject of its own; the tile box is the bounding box _putxobjects() writes
+			$tile = $this->newXObject($tx, ($ty + $th - $this->h), $tw, $th, $group);
+			$gvars = $this->getGraphicVars();
+			$saved = array($this->inxobj, $this->xobjid, $this->transfmatrix_key, $this->svgtext, $this->svgtextmode, $this->svgstyles,
+				$this->svgpatternstack, $this->svgpatternrecord, $this->svgdefsmode, $this->svgclipmode);
+			$drawn = false;
+			try {
+				$this->inxobj = true;
+				$this->xobjid = $tile;
+				$this->svgpatternstack[] = $id;
+				$this->StartTransform();
+				$this->SVGUserTransform(array(1, 0, 0, 1, $tx, $ty));
+				$this->Rect(0, 0, $tw, $th, 'CNZ', array(), array());
+				$this->SVGUserTransform($content_matrix);
+				// the content inherits from the pattern element, not from the shape it fills
+				array_push($this->svgstyles, $pattern['style']);
+				foreach ($pattern['children'] as $event) {
+					if ($event[0] == 'start') {
+						$this->startSVGElementHandler('pattern', $event[1], $event[2]);
+					} elseif ($event[0] == 'end') {
+						$this->endSVGElementHandler('pattern', $event[1]);
+					} else {
+						$this->segSVGContentHandler('pattern', $event[1]);
+					}
+				}
+				$this->StopTransform();
+				$drawn = true;
+			} finally {
+				// also when drawing the tile fails, what follows goes on drawing where the fill started
+				list($this->inxobj, $this->xobjid, $this->transfmatrix_key, $this->svgtext, $this->svgtextmode, $this->svgstyles,
+					$this->svgpatternstack, $this->svgpatternrecord, $this->svgdefsmode, $this->svgclipmode) = $saved;
+				$this->setGraphicVars($gvars);
+				if (!$drawn) {
+					$this->StopTransform();
+				}
+			}
+			$this->svgpatterntiles[$key] = $tile;
+		}
+		if ($this->inxobj) {
+			$this->xobjects[$this->xobjid]['xobjects'][$tile] = $this->xobjects[$tile];
+		}
+		// lay the tiles
+		if ($opacity != 1) {
+			$this->setAlpha($this->alpha['CA'], 'Normal', $opacity, false);
+		}
+		if ($ptm != array(1, 0, 0, 1, 0, 0)) {
+			$this->SVGTransform($ptm);
+		}
+		for ($j = $jmin; $j <= $jmax; ++$j) {
+			for ($i = $imin; $i <= $imax; ++$i) {
+				$this->_out(sprintf('q 1 0 0 1 %F %F cm /%s Do Q', ($i * $tw * $this->k), (-$j * $th * $this->k), $tile));
+			}
+		}
+		$this->StopTransform();
+		return true;
+	}
+
+	/**
+	 * Rules of the style elements of an SVG document, keeping those whose selectors are made of types, the
+	 * universal selector, classes and ids, joined by descendant or child combinators, or a list of them.
+	 * Rules with sibling combinators, pseudo-classes, attribute selectors or inside at-rules are left out.
+	 * @param string $svgdata SVG document
+	 * @return array empty without rules, else 'rules' in cascade order (by specificity, then by order in the
+	 * document) and their 'index', as getSVGRuleKey() keys them
+	 * @protected
+	 */
+	protected function getSVGStyleRules($svgdata) {
+		$rules = array();
+		$order = 0;
+		foreach ($this->getSVGStyleSheets($svgdata) as $css) {
+			$css = preg_replace('/\/\*.*?\*\//s', '', $css);
+			$css = preg_replace('/@[^{;]*;/', '', $css);
+			$css = preg_replace('/@[^{]*\{(?:[^{}]*\{[^{}]*\})*[^{}]*\}/', '', $css);
+			$blocks = array();
+			preg_match_all('/([^{}]+)\{([^{}]*)\}/', $css, $blocks, PREG_SET_ORDER);
+			foreach ($blocks as $block) {
+				$declarations = $this->getSVGStyleDeclarations($block[2]);
+				if (empty($declarations['normal']) AND empty($declarations['important'])) {
+					continue;
+				}
+				foreach (explode(',', $block[1]) as $selector) {
+					$parsed = $this->getSVGSelector($selector);
+					if ($parsed === null) {
+						continue;
+					}
+					$parsed['order'] = $order++;
+					$parsed['declarations'] = $declarations;
+					$rules[] = $parsed;
+				}
+			}
+		}
+		if (empty($rules)) {
+			return array();
+		}
+		usort($rules, function ($a, $b) {
+			$cmp = $a['specificity'] <=> $b['specificity'];
+			return ($cmp !== 0) ? $cmp : ($a['order'] <=> $b['order']);
+		});
+		$index = array();
+		foreach ($rules as $position => $rule) {
+			$index[$this->getSVGRuleKey($rule['compounds'][count($rule['compounds']) - 1])][] = $position;
+		}
+		return array('rules' => $rules, 'index' => $index);
+	}
+
+	/**
+	 * The text of the style elements of an SVG document, read with an XML parser, so style elements inside
+	 * comments or CDATA sections are left out and character references are decoded.
+	 * @param string $svgdata SVG document
+	 * @return array text of each style element
+	 * @protected
+	 */
+	protected function getSVGStyleSheets($svgdata) {
+		$sheets = array();
+		if (!preg_match('/<(?:[a-z0-9_\-]+:)?style\b/i', $svgdata)) {
+			return $sheets;
+		}
+		$depth = 0;
+		$parser = xml_parser_create('UTF-8');
+		xml_parser_set_option($parser, XML_OPTION_CASE_FOLDING, 0);
+		xml_set_element_handler($parser, function ($parser, $name) use (&$sheets, &$depth) {
+			if ($depth > 0) {
+				++$depth;
+			} elseif ($this->removeTagNamespace($name) == 'style') {
+				$depth = 1;
+				$sheets[] = '';
+			}
+		}, function ($parser, $name) use (&$depth) {
+			if ($depth > 0) {
+				--$depth;
+			}
+		});
+		xml_set_character_data_handler($parser, function ($parser, $data) use (&$sheets, &$depth) {
+			if ($depth > 0) {
+				$sheets[count($sheets) - 1] .= $data;
+			}
+		});
+		xml_parse($parser, $svgdata, true);
+		if (function_exists('xml_parser_free') && PHP_VERSION_ID < 80000) {
+			xml_parser_free($parser);
+		}
+		unset($parser);
+		return $sheets;
+	}
+
+	/**
+	 * What an element needs for a compound selector to match it: an id, else a class, else a type ('*' for
+	 * nothing). Rules are indexed by this key of their last compound selector.
+	 * @param array $compound compound selector
+	 * @return string '#id', '.class', type or '*'
+	 * @protected
+	 */
+	protected function getSVGRuleKey($compound) {
+		if (!empty($compound['ids'])) {
+			return '#'.$compound['ids'][0];
+		}
+		if (!empty($compound['classes'])) {
+			return '.'.$compound['classes'][0];
+		}
+		if (($compound['type'] !== '') AND ($compound['type'] !== '*')) {
+			return $compound['type'];
+		}
+		return '*';
+	}
+
+	/**
+	 * A CSS selector made of compound selectors (a type or the universal selector, classes, ids) joined by
+	 * descendant or child combinators.
+	 * @param string $selector selector
+	 * @return array|null 'compounds', the 'combinators' between them and the 'specificity'; null when the
+	 * selector uses anything else
+	 * @protected
+	 */
+	protected function getSVGSelector($selector) {
+		$selector = trim(preg_replace('/[\s]*>[\s]*/', ' > ', trim($selector)));
+		if ($selector === '') {
+			return null;
+		}
+		$compounds = array();
+		$combinators = array();
+		$combinator = ' ';
+		$specificity = array(0, 0, 0);
+		foreach (preg_split('/[\s]+/', $selector) as $token) {
+			if ($token === '>') {
+				if (empty($compounds) OR ($combinator === '>')) {
+					return null;
+				}
+				$combinator = '>';
+				continue;
+			}
+			$parts = array();
+			if (!preg_match('/^(\*|[a-zA-Z][a-zA-Z0-9_\-]*)?((?:[\.\#][a-zA-Z0-9_\-]+)*)$/', $token, $parts) OR ($token === '')) {
+				return null;
+			}
+			$compound = array('type' => isset($parts[1]) ? $parts[1] : '', 'ids' => array(), 'classes' => array());
+			$names = array();
+			preg_match_all('/([\.\#])([a-zA-Z0-9_\-]+)/', isset($parts[2]) ? $parts[2] : '', $names, PREG_SET_ORDER);
+			foreach ($names as $name) {
+				if ($name[1] == '#') {
+					$compound['ids'][] = $name[2];
+				} else {
+					$compound['classes'][] = $name[2];
+				}
+			}
+			$specificity[0] += count($compound['ids']);
+			$specificity[1] += count($compound['classes']);
+			$specificity[2] += (($compound['type'] !== '') AND ($compound['type'] !== '*')) ? 1 : 0;
+			if (!empty($compounds)) {
+				$combinators[] = $combinator;
+			}
+			$compounds[] = $compound;
+			$combinator = ' ';
+		}
+		if ($combinator === '>') {
+			return null;
+		}
+		return array('compounds' => $compounds, 'combinators' => $combinators, 'specificity' => $specificity);
+	}
+
+	/**
+	 * What a CSS selector can see of an SVG element: its name, id and classes.
+	 * @param string $name element name
+	 * @param array $attribs element attributes
+	 * @return array 'type', 'id' and 'classes', the class names as keys
+	 * @protected
+	 */
+	protected function getSVGSelectorSubject($name, $attribs) {
+		$classes = isset($attribs['class']) ? trim($attribs['class']) : '';
+		return array(
+			'type' => $name,
+			'id' => isset($attribs['id']) ? $attribs['id'] : '',
+			'classes' => ($classes === '') ? array() : array_flip(preg_split('/[\s]+/', $classes))
+		);
+	}
+
+	/**
+	 * Whether a compound selector matches an element.
+	 * @param array $compound compound selector
+	 * @param array $subject element, as getSVGSelectorSubject() describes it
+	 * @return bool
+	 * @protected
+	 */
+	protected function matchesSVGCompound($compound, $subject) {
+		if (($compound['type'] !== '') AND ($compound['type'] !== '*') AND ($compound['type'] !== $subject['type'])) {
+			return false;
+		}
+		foreach ($compound['ids'] as $id) {
+			if ($id !== $subject['id']) {
+				return false;
+			}
+		}
+		foreach ($compound['classes'] as $class) {
+			if (!isset($subject['classes'][$class])) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/**
+	 * Whether the compound selectors up to $index match the ancestors up to $from, each joined to the one
+	 * after it by its combinator.
+	 * @param array $rule selector, as getSVGSelector() returns it
+	 * @param int $index compound selector to match
+	 * @param int $from nearest ancestor it may match
+	 * @return bool
+	 * @protected
+	 */
+	protected function matchesSVGAncestors($rule, $index, $from) {
+		if ($index < 0) {
+			return true;
+		}
+		for ($i = $from; $i >= 0; --$i) {
+			if ($this->matchesSVGCompound($rule['compounds'][$index], $this->svgancestors[$i]) AND $this->matchesSVGAncestors($rule, ($index - 1), ($i - 1))) {
+				return true;
+			}
+			if ($rule['combinators'][$index] === '>') {
+				return false;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Declarations of a CSS block or style attribute, the later of two for one property winning.
+	 * @param string $css declarations
+	 * @return array 'normal' and 'important' declarations, by property
+	 * @protected
+	 */
+	protected function getSVGStyleDeclarations($css) {
+		$declarations = array('normal' => array(), 'important' => array());
+		if (strpbrk($css, '"\'(') === false) {
+			// no quote or bracket can hold a semicolon
+			$parts = explode(';', $css);
+		} else {
+			$parts = array();
+			$current = '';
+			$depth = 0;
+			$quote = '';
+			$length = strlen($css);
+			for ($i = 0; $i < $length; ++$i) {
+				$char = $css[$i];
+				if ($quote !== '') {
+					if ($char == $quote) {
+						$quote = '';
+					}
+				} elseif (($char == '"') OR ($char == "'")) {
+					$quote = $char;
+				} elseif ($char == '(') {
+					++$depth;
+				} elseif (($char == ')') AND ($depth > 0)) {
+					--$depth;
+				} elseif (($char == ';') AND ($depth == 0)) {
+					$parts[] = $current;
+					$current = '';
+					continue;
+				}
+				$current .= $char;
+			}
+			$parts[] = $current;
+		}
+		foreach ($parts as $part) {
+			$colon = strpos($part, ':');
+			if ($colon === false) {
+				continue;
+			}
+			$property = strtolower(trim(substr($part, 0, $colon)));
+			$value = trim(substr($part, ($colon + 1)));
+			$priority = 'normal';
+			if (preg_match('/[\s]*![\s]*important[\s]*$/i', $value, $important)) {
+				$value = trim(substr($value, 0, -strlen($important[0])));
+				$priority = 'important';
+			}
+			if (($property === '') OR ($value === '')) {
+				continue;
+			}
+			$value = $this->getSVGStyleValue($property, $value);
+			if ($value === null) {
+				continue;
+			}
+			unset($declarations[$priority][$property]);
+			$declarations[$priority][$property] = $value;
+		}
+		return $declarations;
+	}
+
+	/**
+	 * A CSS value as TCPDF can draw it: var() replaced by its fallback, as for a custom property never defined,
+	 * and the CSS-wide keywords resolved.
+	 * @param string $property property name
+	 * @param string $value declared value
+	 * @return string|null null when TCPDF cannot read the value, so the declaration is left out
+	 * @protected
+	 */
+	protected function getSVGStyleValue($property, $value) {
+		while (stripos($value, 'var(') !== false) {
+			$var = array();
+			if (!preg_match('/var\([\s]*--[a-zA-Z0-9_\-]+[\s]*(?:,((?:[^()]|\([^()]*\))*))?\)/i', $value, $var) OR !isset($var[1]) OR (trim($var[1]) === '')) {
+				return null;
+			}
+			$value = trim(str_replace($var[0], trim($var[1]), $value));
+		}
+		$keyword = strtolower($value);
+		if (in_array($keyword, array('initial', 'unset', 'revert', 'revert-layer'))) {
+			if (($keyword != 'initial') AND in_array($property, TCPDF_IMAGES::$svginheritprop)) {
+				return 'inherit';
+			}
+			return (isset($this->svgstyles[0][$property]) AND !is_array($this->svgstyles[0][$property])) ? (string) $this->svgstyles[0][$property] : null;
+		}
+		if (preg_match('/\b(?:calc|env|attr|min|max|clamp)\(/i', $value)) {
+			return null;
+		}
+		if (!in_array($property, array('fill', 'stroke', 'color', 'stop-color', 'flood-color', 'lighting-color'))) {
+			return $value;
+		}
+		if (in_array($keyword, array('inherit', 'currentcolor'))) {
+			return $value;
+		}
+		if (in_array($property, array('fill', 'stroke')) AND (in_array($keyword, array('none', 'transparent')) OR (substr($keyword, 0, 4) == 'url('))) {
+			return $value;
+		}
+		$spot_colors = $this->spot_colors;
+		return (TCPDF_COLORS::convertHTMLColorToDec($value, $spot_colors, false) === false) ? null : $value;
+	}
+
+	/**
+	 * Apply the style rules and the style attribute of an SVG element to its attributes, in CSS order: a rule
+	 * wins over a presentation attribute and the style attribute over a rule, unless the rule is important.
+	 * @param string $name element name
+	 * @param array $attribs element attributes
+	 * @return array attributes with the styled properties set, and without the style attribute
+	 * @protected
+	 */
+	protected function applySVGStyleRules($name, $attribs) {
+		$inline = array('normal' => array(), 'important' => array());
+		if (isset($attribs['style'])) {
+			$inline = $this->getSVGStyleDeclarations($attribs['style']);
+			unset($attribs['style']);
+		}
+		$matched = array();
+		if (!empty($this->svgcssrules)) {
+			// only the rules indexed under what the element has can match it
+			$subject = $this->getSVGSelectorSubject($name, $attribs);
+			$keys = array('*', $name);
+			if ($subject['id'] !== '') {
+				$keys[] = '#'.$subject['id'];
+			}
+			foreach (array_keys($subject['classes']) as $class) {
+				$keys[] = '.'.$class;
+			}
+			$positions = array();
+			foreach ($keys as $key) {
+				if (isset($this->svgcssrules['index'][$key])) {
+					$positions = array_merge($positions, $this->svgcssrules['index'][$key]);
+				}
+			}
+			sort($positions);
+			$from = count($this->svgancestors) - 1;
+			foreach ($positions as $position) {
+				$rule = $this->svgcssrules['rules'][$position];
+				$last = count($rule['compounds']) - 1;
+				if ($this->matchesSVGCompound($rule['compounds'][$last], $subject) AND $this->matchesSVGAncestors($rule, ($last - 1), $from)) {
+					$matched[] = $rule;
+				}
+			}
+		}
+		if (empty($matched) AND empty($inline['normal']) AND empty($inline['important'])) {
+			return $attribs;
+		}
+		$computed = array();
+		foreach ($matched as $rule) {
+			$computed = array_merge($computed, $rule['declarations']['normal']);
+		}
+		$computed = array_merge($computed, $inline['normal']);
+		foreach ($matched as $rule) {
+			$computed = array_merge($computed, $rule['declarations']['important']);
+		}
+		$computed = array_merge($computed, $inline['important']);
+		foreach ($computed as $property => $value) {
+			if (array_key_exists($property, $this->svgstyles[0]) AND ($property != 'transfmatrix') AND ($property != 'text-color')) {
+				$attribs[$property] = $value;
+			}
+		}
+		return $attribs;
+	}
+
+	/**
 	 * Apply the requested SVG styles (*** TO BE COMPLETED ***)
 	 * @param array $svgstyle array of SVG styles to apply
 	 * @param array $prevsvgstyle array of previous SVG style
@@ -23733,21 +24670,41 @@ class TCPDF {
 		}
 		// clip-path
 		$regs = array();
-		if (preg_match('/url\([\s]*\#([^\)]*)\)/si', $svgstyle['clip-path'], $regs)) {
+		if (preg_match('/url\([\s]*[\'"]?\#([^\'"\)\s]*)[\'"]?[\s]*\)/si', $svgstyle['clip-path'], $regs) AND isset($this->svgclippaths[$regs[1]])) {
 			$clip_path = $this->svgclippaths[$regs[1]];
+			// the elements of a clip path inherit from the clipPath element, not from the element it clips
+			array_push($this->svgstyles, isset($this->svgclipstyles[$regs[1]]) ? $this->svgclipstyles[$regs[1]] : $this->svgstyles[0]);
+			$clip_shapes = $this->svgclipshapes;
+			$this->svgclipshapes = 0;
 			foreach ($clip_path as $cp) {
+				$this->svgcliptext = isset($cp['text']) ? $cp['text'] : '';
 				$this->startSVGElementHandler('clip-path', $cp['name'], $cp['attribs'], $cp['tm']);
 			}
+			$this->svgcliptext = '';
+			if ($this->svgclipshapes == 0) {
+				// a clip path with nothing to clip with hides what it clips
+				$this->_out('0 0 0 0 re W n');
+			}
+			$this->svgclipshapes = $clip_shapes;
+			array_pop($this->svgstyles);
 		}
-		// opacity
-		if ($svgstyle['opacity'] != 1) {
-			$this->setAlpha($svgstyle['opacity'], 'Normal', $svgstyle['opacity'], false);
+		// opacity: a shape painting both a fill and a stroke is composed first, as a transparency group, so its
+		// stroke covers its fill; otherwise the opacity multiplies those of the fill and the stroke
+		$opacity = $this->getSVGOpacity($svgstyle['opacity']);
+		$fills_area = in_array($clip_function, array('SVGPath', 'RoundedRectXY', 'Circle', 'Ellipse', 'Polygon', 'PolyLine'));
+		$fill = $this->getSVGPaint($svgstyle['fill'], $svgstyle);
+		$stroke = $this->getSVGSolidPaint($this->getSVGPaint($svgstyle['stroke'], $svgstyle), $svgstyle);
+		if (($opacity != 1) AND $fills_area AND ($fill['type'] != 'none') AND ($stroke['type'] == 'color')) {
+			$this->startSVGOpacityGroup($opacity, (count($this->svgstyles) + 1));
+			$opacity = 1;
+		} elseif ($opacity != 1) {
+			$this->setAlpha($opacity, 'Normal', $opacity, false);
 		}
 		// color
 		$fill_color = TCPDF_COLORS::convertHTMLColorToDec($svgstyle['color'], $this->spot_colors);
 		$this->setFillColorArray($fill_color);
 		// text color
-		$text_color = TCPDF_COLORS::convertHTMLColorToDec($svgstyle['text-color'], $this->spot_colors);
+		$text_color = is_array($svgstyle['text-color']) ? $svgstyle['text-color'] : TCPDF_COLORS::convertHTMLColorToDec($svgstyle['text-color'], $this->spot_colors);
 		$this->setTextColorArray($text_color);
 		// clip
 		if (preg_match('/rect\(([a-z0-9\-\.]*+)[\s]*+([a-z0-9\-\.]*+)[\s]*+([a-z0-9\-\.]*+)[\s]*+([a-z0-9\-\.]*+)\)/si', $svgstyle['clip'], $regs)) {
@@ -23767,22 +24724,20 @@ class TCPDF {
 			$this->Rect($cx, $cy, $cw, $ch, $clip_rule, array(), array());
 		}
 		// fill
-		$regs = array();
-		if (preg_match('/url\([\s]*\#([^\)]*)\)/si', $svgstyle['fill'], $regs)) {
-			// gradient
-			$gradient = $this->svggradients[$regs[1]];
-			if (isset($gradient['xref'])) {
-				// reference to another gradient definition
-				$newgradient = $this->svggradients[$gradient['xref']];
-				$newgradient['coords'] = $gradient['coords'];
-				$newgradient['mode'] = $gradient['mode'];
-				$newgradient['type'] = $gradient['type'];
-				$newgradient['gradientUnits'] = $gradient['gradientUnits'];
-				if (isset($gradient['gradientTransform'])) {
-					$newgradient['gradientTransform'] = $gradient['gradientTransform'];
-				}
-				$gradient = $newgradient;
+		if ($fill['type'] == 'pattern') {
+			if (!$fills_area OR !$this->SVGPatternFill($fill['id'], $x, $y, $w, $h, $clip_function, $clip_params, ($opacity * $this->getSVGOpacity($svgstyle['fill-opacity'])))) {
+				$fill = $this->getSVGSolidPaint($fill, $svgstyle);
 			}
+		} elseif ($fill['type'] == 'gradient') {
+			$gradient = $this->getSVGGradient($fill['id']);
+			if (count($gradient['stops']) < 2) {
+				// one stop paints its colour, none paints nothing
+				$fill = $this->getSVGSolidPaint($fill, $svgstyle);
+			} elseif (!$fills_area) {
+				$fill = array('type' => 'none');
+			}
+		}
+		if ($fill['type'] == 'gradient') {
 			//save current Graphic State
 			$this->_outSaveGraphicsState();
 			//set clipping area
@@ -23846,6 +24801,14 @@ class TCPDF {
 						$gradient['coords'][$key] = 1;
 					}
 				}
+			} elseif (($gradient['mode'] == 'ratio') AND ($gradient['type'] == 2) AND !empty($gradient['gradientTransform'])) {
+				// a bounding-box gradient transform is in fractions of the box, like the coordinates
+				$gtm = $gradient['gradientTransform'];
+				list($xa, $ya, $xb, $yb) = $gradient['coords'];
+				$gradient['coords'][0] = ($gtm[0] * $xa) + ($gtm[2] * $ya) + $gtm[4];
+				$gradient['coords'][1] = ($gtm[1] * $xa) + ($gtm[3] * $ya) + $gtm[5];
+				$gradient['coords'][2] = ($gtm[0] * $xb) + ($gtm[2] * $yb) + $gtm[4];
+				$gradient['coords'][3] = ($gtm[1] * $xb) + ($gtm[3] * $yb) + $gtm[5];
 			}
 			if (($gradient['type'] == 2) AND ($gradient['coords'][0] == $gradient['coords'][2]) AND ($gradient['coords'][1] == $gradient['coords'][3])) {
 				// single color (no shading)
@@ -23854,10 +24817,16 @@ class TCPDF {
 				$gradient['coords'][2] = 0.999;
 				$gradient['coords'][3] = 0;
 			}
-			// swap Y coordinates
-			$tmp = $gradient['coords'][1];
-			$gradient['coords'][1] = $gradient['coords'][3];
-			$gradient['coords'][3] = $tmp;
+			if ($gradient['type'] == 2) {
+				// the gradient box is drawn with y up
+				$gradient['coords'][1] = 1 - $gradient['coords'][1];
+				$gradient['coords'][3] = 1 - $gradient['coords'][3];
+			} else {
+				// swap Y coordinates
+				$tmp = $gradient['coords'][1];
+				$gradient['coords'][1] = $gradient['coords'][3];
+				$gradient['coords'][3] = $tmp;
+			}
 			// set transformation map for gradient
 			$cy = ($this->h - $y);
 			if ($gradient['type'] == 3) {
@@ -23871,12 +24840,13 @@ class TCPDF {
 			if ((is_array($gradient['stops']) || $gradient['stops'] instanceof Countable) && count($gradient['stops']) > 1) {
 				$this->Gradient($gradient['type'], $gradient['coords'], $gradient['stops']);
 			}
-		} elseif ($svgstyle['fill'] != 'none') {
-			$fill_color = TCPDF_COLORS::convertHTMLColorToDec($svgstyle['fill'], $this->spot_colors);
-			if ($svgstyle['fill-opacity'] != 1) {
-				$this->setAlpha($this->alpha['CA'], 'Normal', $svgstyle['fill-opacity'], false);
-			} elseif (preg_match('/rgba\(\d+%?,\s*\d+%?,\s*\d+%?,\s*(\d+(?:\.\d+)?)\)/i', $svgstyle['fill'], $rgba_matches)) {
-				$this->setAlpha($this->alpha['CA'], 'Normal', $rgba_matches[1], false);
+		} elseif ($fill['type'] == 'color') {
+			$fill_color = is_array($fill['color']) ? $fill['color'] : TCPDF_COLORS::convertHTMLColorToDec($fill['color'], $this->spot_colors);
+			$fill_opacity = $this->getSVGOpacity($svgstyle['fill-opacity']) * (isset($fill['opacity']) ? $this->getSVGOpacity($fill['opacity']) : 1);
+			if ($fill_opacity != 1) {
+				$this->setAlpha($this->alpha['CA'], 'Normal', ($opacity * $fill_opacity), false);
+			} elseif (!is_array($fill['color']) AND preg_match('/rgba\(\d+%?,\s*\d+%?,\s*\d+%?,\s*(\d+(?:\.\d+)?)\)/i', $fill['color'], $rgba_matches)) {
+				$this->setAlpha($this->alpha['CA'], 'Normal', ($opacity * $rgba_matches[1]), false);
 			}
 			$this->setFillColorArray($fill_color);
 			if ($svgstyle['fill-rule'] == 'evenodd') {
@@ -23885,16 +24855,17 @@ class TCPDF {
 				$objstyle .= 'F';
 			}
 		}
-		// stroke
-		if ($svgstyle['stroke'] != 'none') {
-			if ($svgstyle['stroke-opacity'] != 1) {
-				$this->setAlpha($svgstyle['stroke-opacity'], 'Normal', $this->alpha['ca'], false);
-			} elseif (preg_match('/rgba\(\d+%?,\s*\d+%?,\s*\d+%?,\s*(\d+(?:\.\d+)?)\)/i', $svgstyle['stroke'], $rgba_matches)) {
-				$this->setAlpha($rgba_matches[1], 'Normal', $this->alpha['ca'], false);
+		// stroke, in the first colour of a gradient
+		if ($stroke['type'] == 'color') {
+			$stroke_opacity = $this->getSVGOpacity($svgstyle['stroke-opacity']) * (isset($stroke['opacity']) ? $this->getSVGOpacity($stroke['opacity']) : 1);
+			if ($stroke_opacity != 1) {
+				$this->setAlpha(($opacity * $stroke_opacity), 'Normal', $this->alpha['ca'], false);
+			} elseif (!is_array($stroke['color']) AND preg_match('/rgba\(\d+%?,\s*\d+%?,\s*\d+%?,\s*(\d+(?:\.\d+)?)\)/i', $stroke['color'], $rgba_matches)) {
+				$this->setAlpha(($opacity * $rgba_matches[1]), 'Normal', $this->alpha['ca'], false);
 			}
 			$stroke_style = array(
-				'color' => TCPDF_COLORS::convertHTMLColorToDec($svgstyle['stroke'], $this->spot_colors),
-				'width' => $this->getHTMLUnitToUnits($svgstyle['stroke-width'], 0, $this->svgunit, false),
+				'color' => is_array($stroke['color']) ? $stroke['color'] : TCPDF_COLORS::convertHTMLColorToDec($stroke['color'], $this->spot_colors),
+				'width' => $this->getSVGLength($svgstyle['stroke-width'], 'd'),
 				'cap' => $svgstyle['stroke-linecap'],
 				'join' => $svgstyle['stroke-linejoin']
 				);
@@ -23904,7 +24875,17 @@ class TCPDF {
 			$this->setLineStyle($stroke_style);
 			$objstyle .= 'D';
 		}
-		// font
+		$this->setSVGFont($svgstyle, $prevsvgstyle);
+		return $objstyle;
+	}
+
+	/**
+	 * Set the font of an SVG element.
+	 * @param array $svgstyle style of the element
+	 * @param array $prevsvgstyle style of its parent
+	 * @protected
+	 */
+	protected function setSVGFont($svgstyle, $prevsvgstyle) {
 		$regs = array();
 		if (!empty($svgstyle['font'])) {
 			if (preg_match('/font-family[\s]*:[\s]*([^\;\"]*)/si', $svgstyle['font'], $regs)) {
@@ -23999,7 +24980,6 @@ class TCPDF {
 		$this->setFont($font_family, $font_style, $font_size);
 		$this->setFontStretching($font_stretch);
 		$this->setFontSpacing($font_spacing);
-		return $objstyle;
 	}
 
 	/**
@@ -24394,50 +25374,14 @@ class TCPDF {
 	}
 
 	/**
-	 * Sets the opening SVG element handler function for the XML parser. (*** TO BE COMPLETED ***)
-	 * @param resource|string $parser The first parameter, parser, is a reference to the XML parser calling the handler.
-	 * @param string $name The second parameter, name, contains the name of the element for which this handler is called. If case-folding is in effect for this parser, the element name will be in uppercase letters.
-	 * @param array $attribs The third parameter, attribs, contains an associative array with the element's attributes (if any). The keys of this array are the attribute names, the values are the attribute values. Attribute names are case-folded on the same criteria as element names. Attribute values are not case-folded. The original order of the attributes can be retrieved by walking through attribs the normal way, using each(). The first key in the array was the first attribute, and so on.
-	 * @param array $ctm tranformation matrix for clipping mode (starting transformation matrix).
-	 * @author Nicola Asuni
-	 * @since 5.0.000 (2010-05-02)
+	 * The style of an SVG element: the properties it inherits from its parent's style, then its own.
+	 * @param array $attribs element attributes, presentation attributes and an optional style attribute
+	 * @param array $prev_svgstyle style of the parent element
+	 * @return array
 	 * @protected
 	 */
-	protected function startSVGElementHandler($parser, $name, $attribs, $ctm=array()) {
-		$name = $this->removeTagNamespace($name);
-		// check if we are in clip mode
-		if ($this->svgclipmode) {
-			$this->svgclippaths[$this->svgclipid][] = array('name' => $name, 'attribs' => $attribs, 'tm' => $this->svgcliptm[$this->svgclipid]);
-			return;
-		}
-		if ($this->svgdefsmode AND !in_array($name, array('clipPath', 'linearGradient', 'radialGradient', 'stop'))) {
-			if (isset($attribs['id'])) {
-				$attribs['child_elements'] = array();
-				$this->svgdefs[$attribs['id']] = array('name' => $name, 'attribs' => $attribs);
-				return;
-			}
-			if (end($this->svgdefs) !== FALSE) {
-				$last_svgdefs_id = key($this->svgdefs);
-				if (isset($this->svgdefs[$last_svgdefs_id]['attribs']['child_elements'])) {
-					$attribs['id'] = 'DF_'.(count($this->svgdefs[$last_svgdefs_id]['attribs']['child_elements']) + 1);
-					$this->svgdefs[$last_svgdefs_id]['attribs']['child_elements'][$attribs['id']] = array('name' => $name, 'attribs' => $attribs);
-					return;
-				}
-			}
-			return;
-		}
-		$clipping = false;
-		if ($parser == 'clip-path') {
-			// set clipping mode
-			$clipping = true;
-		}
-		// get styling properties
-		$prev_svgstyle = $this->svgstyles[max(0,(count($this->svgstyles) - 1))]; // previous style
+	protected function getSVGElementStyle($attribs, $prev_svgstyle) {
 		$svgstyle = $this->svgstyles[0]; // set default style
-		if ($clipping AND !isset($attribs['fill']) AND (!isset($attribs['style']) OR (!preg_match('/[;\"\s]{1}fill[\s]*:[\s]*([^;\"]*)/si', $attribs['style'], $attrval)))) {
-			// default fill attribute for clipping
-			$attribs['fill'] = 'none';
-		}
 		if (isset($attribs['style']) AND !TCPDF_STATIC::empty_string($attribs['style']) AND ($attribs['style'][0] != ';')) {
 			// fix style for regular expression
 			$attribs['style'] = ';'.$attribs['style'];
@@ -24466,6 +25410,93 @@ class TCPDF {
 				}
 			}
 		}
+		return $svgstyle;
+	}
+
+	/**
+	 * Sets the opening SVG element handler function for the XML parser. (*** TO BE COMPLETED ***)
+	 * @param resource|string $parser The first parameter, parser, is a reference to the XML parser calling the handler.
+	 * @param string $name The second parameter, name, contains the name of the element for which this handler is called. If case-folding is in effect for this parser, the element name will be in uppercase letters.
+	 * @param array $attribs The third parameter, attribs, contains an associative array with the element's attributes (if any). The keys of this array are the attribute names, the values are the attribute values. Attribute names are case-folded on the same criteria as element names. Attribute values are not case-folded. The original order of the attributes can be retrieved by walking through attribs the normal way, using each(). The first key in the array was the first attribute, and so on.
+	 * @param array $ctm tranformation matrix for clipping mode (starting transformation matrix).
+	 * @author Nicola Asuni
+	 * @since 5.0.000 (2010-05-02)
+	 * @protected
+	 */
+	protected function startSVGElementHandler($parser, $name, $attribs, $ctm=array()) {
+		$name = $this->removeTagNamespace($name);
+		if (isset($attribs['href']) AND !isset($attribs['xlink:href'])) {
+			// SVG 2 references without the xlink namespace
+			$attribs['xlink:href'] = $attribs['href'];
+		}
+		if (!is_string($parser)) {
+			// style rules match where the element is written, also when it is kept as a definition, clip path or pattern tile
+			$attribs = $this->applySVGStyleRules($name, $attribs);
+			if (!empty($this->svgcssrules)) {
+				$this->svgancestors[] = $this->getSVGSelectorSubject($name, $attribs);
+			}
+		}
+		// record the content of a pattern, drawn as its tile wherever it fills a shape
+		if (!empty($this->svgpatternrecord)) {
+			if ($name == 'pattern') {
+				++$this->svgpatternrecord['depth'];
+			}
+			$this->svgpatterns[$this->svgpatternrecord['id']]['children'][] = array('start', $name, $attribs);
+			return;
+		}
+		if (($name == 'pattern') AND !$this->svgclipmode) {
+			if (!isset($attribs['id'])) {
+				$attribs['id'] = 'PT_'.(count($this->svgpatterns) + 1);
+			}
+			// the content inherits from the pattern element where it is written
+			$style = $this->getSVGElementStyle($attribs, $this->svgstyles[(count($this->svgstyles) - 1)]);
+			$this->svgpatterns[$attribs['id']] = array('attribs' => $attribs, 'children' => array(), 'style' => $style);
+			$this->svgpatternrecord = array('id' => $attribs['id'], 'depth' => 0);
+			return;
+		}
+		// check if we are in clip mode
+		if ($this->svgclipmode) {
+			// a clip path holds shapes, text and use elements; anything else, and what is inside it, adds nothing
+			if (($this->svgclipskip > 0) OR !in_array($name, array('path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text', 'tspan', 'use'))) {
+				++$this->svgclipskip;
+				return;
+			}
+			if (($name == 'text') OR ($name == 'tspan')) {
+				// its characters are kept when it ends
+				$this->svgcliptexts[] = count($this->svgclippaths[$this->svgclipid]);
+				$this->svgtext = '';
+			}
+			$this->svgclippaths[$this->svgclipid][] = array('name' => $name, 'attribs' => $attribs, 'tm' => $this->svgcliptm[$this->svgclipid]);
+			return;
+		}
+		if ($this->svgdefsmode AND !in_array($name, array('clipPath', 'linearGradient', 'radialGradient', 'stop'))) {
+			if (isset($attribs['id'])) {
+				$attribs['child_elements'] = array();
+				$this->svgdefs[$attribs['id']] = array('name' => $name, 'attribs' => $attribs);
+				return;
+			}
+			if (end($this->svgdefs) !== FALSE) {
+				$last_svgdefs_id = key($this->svgdefs);
+				if (isset($this->svgdefs[$last_svgdefs_id]['attribs']['child_elements'])) {
+					$attribs['id'] = 'DF_'.(count($this->svgdefs[$last_svgdefs_id]['attribs']['child_elements']) + 1);
+					$this->svgdefs[$last_svgdefs_id]['attribs']['child_elements'][$attribs['id']] = array('name' => $name, 'attribs' => $attribs);
+					return;
+				}
+			}
+			return;
+		}
+		$clipping = false;
+		if ($parser == 'clip-path') {
+			// set clipping mode
+			$clipping = true;
+		}
+		// get styling properties
+		$prev_svgstyle = $this->svgstyles[max(0,(count($this->svgstyles) - 1))]; // previous style
+		if ($clipping AND !isset($attribs['fill']) AND (!isset($attribs['style']) OR (!preg_match('/[;\"\s]{1}fill[\s]*:[\s]*([^;\"]*)/si', $attribs['style'], $attrval)))) {
+			// default fill attribute for clipping
+			$attribs['fill'] = 'none';
+		}
+		$svgstyle = $this->getSVGElementStyle($attribs, $prev_svgstyle);
 		// transformation matrix
 		if (!empty($ctm)) {
 			$tm = $ctm;
@@ -24481,6 +25512,8 @@ class TCPDF {
 			// the current graphics element is invisible (nothing is painted)
 			$invisible = true;
 		}
+		$clip_operator = ($svgstyle['clip-rule'] == 'evenodd') ? 'CEO' : 'CNZ';
+		$fill_clip_operator = ($svgstyle['fill-rule'] == 'evenodd') ? 'CEO' : 'CNZ';
 		// process tag
 		switch($name) {
 			case 'defs': {
@@ -24493,34 +25526,44 @@ class TCPDF {
 					break;
 				}
 				$this->svgclipmode = true;
+				$this->svgclipskip = 0;
+				$this->svgcliptexts = array();
 				if (!isset($attribs['id'])) {
 					$attribs['id'] = 'CP_'.(count($this->svgcliptm) + 1);
 				}
 				$this->svgclipid = $attribs['id'];
 				$this->svgclippaths[$this->svgclipid] = array();
 				$this->svgcliptm[$this->svgclipid] = $tm;
+				$this->svgclipstyles[$this->svgclipid] = $svgstyle;
 				break;
 			}
 			case 'svg': {
 				// start of SVG object
 				if(++$this->svg_tag_depth <= 1) {
+					// the root element's properties are inherited like a group's
+					array_push($this->svgstyles, $svgstyle);
 					break;
 				}
 				// inner SVG
 				array_push($this->svgstyles, $svgstyle);
 				$this->StartTransform();
-				$svgX = (isset($attribs['x'])?$attribs['x']:0);
-				$svgY = (isset($attribs['y'])?$attribs['y']:0);
-				$svgW = (isset($attribs['width'])?$attribs['width']:0);
-				$svgH = (isset($attribs['height'])?$attribs['height']:0);
+				// its position and size, percentages being shares of the viewport around it, and in SVG units for the matrix
+				$unit = $this->getSVGUnitScale();
+				$w = $this->getSVGLength((isset($attribs['width']) ? $attribs['width'] : '100%'), 'x');
+				$h = $this->getSVGLength((isset($attribs['height']) ? $attribs['height'] : '100%'), 'y');
+				$svgX = isset($attribs['x']) ? ($this->getSVGLength($attribs['x'], 'x') / $unit) : 0;
+				$svgY = isset($attribs['y']) ? ($this->getSVGLength($attribs['y'], 'y') / $unit) : 0;
+				$svgW = $w / $unit;
+				$svgH = $h / $unit;
+				// its content takes percentages from its own viewport
+				$this->svgviewports[] = $this->svgviewport;
+				$this->svgviewport = array($w, $h);
 				// set x, y position using transform matrix
 				$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array( 1, 0, 0, 1, $svgX, $svgY));
 				$this->SVGTransform($tm);
 				// set clipping for width and height
 				$x = 0;
 				$y = 0;
-				$w = (isset($attribs['width'])?$this->getHTMLUnitToUnits($attribs['width'], 0, $this->svgunit, false):$this->w);
-				$h = (isset($attribs['height'])?$this->getHTMLUnitToUnits($attribs['height'], 0, $this->svgunit, false):$this->h);
 				// draw clipping rect
 				$this->Rect($x, $y, $w, $h, 'CNZ', array(), array());
 				// parse viewbox, calculate extra transformation matrix
@@ -24533,6 +25576,7 @@ class TCPDF {
 						$vy = $tmp[1];
 						$vw = $tmp[2];
 						$vh = $tmp[3];
+						$this->svgviewport = array(($vw * $unit), ($vh * $unit));
 						// get aspect ratio
 						$tmp = array();
 						$aspectX = 'xMid';
@@ -24577,6 +25621,9 @@ class TCPDF {
 					}
 				}
 				$this->setSVGStyles($svgstyle, $prev_svgstyle);
+				if (!$clipping) {
+					$this->startSVGOpacityGroup($svgstyle['opacity']);
+				}
 				break;
 			}
 			case 'g': {
@@ -24590,6 +25637,9 @@ class TCPDF {
 				$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array($w, 0, 0, $h, $x, $y));
 				$this->SVGTransform($tm);
 				$this->setSVGStyles($svgstyle, $prev_svgstyle);
+				if (!$clipping) {
+					$this->startSVGOpacityGroup($svgstyle['opacity']);
+				}
 				break;
 			}
 			case 'linearGradient': {
@@ -24622,6 +25672,14 @@ class TCPDF {
 				$y1 = (isset($attribs['y1'])?$attribs['y1']:'0');
 				$x2 = (isset($attribs['x2'])?$attribs['x2']:'100');
 				$y2 = (isset($attribs['y2'])?$attribs['y2']:'0');
+				if ($this->svggradients[$this->svggradientid]['gradientUnits'] == 'objectBoundingBox') {
+					// fractions of the bounding box of the shape, plain or as percentages
+					$this->svggradients[$this->svggradientid]['mode'] = 'ratio';
+					$x1 = $this->getSVGFraction($attribs, 'x1', 0);
+					$y1 = $this->getSVGFraction($attribs, 'y1', 0);
+					$x2 = $this->getSVGFraction($attribs, 'x2', 1);
+					$y2 = $this->getSVGFraction($attribs, 'y2', 0);
+				}
 				if (isset($attribs['gradientTransform'])) {
 					$this->svggradients[$this->svggradientid]['gradientTransform'] = TCPDF_STATIC::getSVGTransformMatrix($attribs['gradientTransform']);
 				}
@@ -24703,14 +25761,17 @@ class TCPDF {
 						$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array($w, 0, 0, $h, $x, $y));
 						if ($clipping) {
 							$this->SVGTransform($tm);
-							$this->SVGPath($d, 'CNZ');
+							$this->SVGPath($d, $clip_operator);
+							$this->SVGTransformInverse($tm);
+							++$this->svgclipshapes;
 						} else {
 							$this->StartTransform();
 							$this->SVGTransform($tm);
-							$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'SVGPath', array($d, 'CNZ'));
+							$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'SVGPath', array($d, $fill_clip_operator));
 							if (!empty($obstyle)) {
 								$this->SVGPath($d, $obstyle);
 							}
+							$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 							$this->StopTransform();
 						}
 					}
@@ -24722,15 +25783,17 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$x = (isset($attribs['x'])?$this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false):0);
-				$y = (isset($attribs['y'])?$this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false):0);
-				$w = (isset($attribs['width'])?$this->getHTMLUnitToUnits($attribs['width'], 0, $this->svgunit, false):0);
-				$h = (isset($attribs['height'])?$this->getHTMLUnitToUnits($attribs['height'], 0, $this->svgunit, false):0);
-				$rx = (isset($attribs['rx'])?$this->getHTMLUnitToUnits($attribs['rx'], 0, $this->svgunit, false):0);
-				$ry = (isset($attribs['ry'])?$this->getHTMLUnitToUnits($attribs['ry'], 0, $this->svgunit, false):$rx);
+				$x = (isset($attribs['x'])?$this->getSVGLength($attribs['x'], 'x'):0);
+				$y = (isset($attribs['y'])?$this->getSVGLength($attribs['y'], 'y'):0);
+				$w = (isset($attribs['width'])?$this->getSVGLength($attribs['width'], 'x'):0);
+				$h = (isset($attribs['height'])?$this->getSVGLength($attribs['height'], 'y'):0);
+				$rx = (isset($attribs['rx'])?$this->getSVGLength($attribs['rx'], 'x'):0);
+				$ry = (isset($attribs['ry'])?$this->getSVGLength($attribs['ry'], 'y'):$rx);
 				if ($clipping) {
 					$this->SVGTransform($tm);
-					$this->RoundedRectXY($x, $y, $w, $h, $rx, $ry, '1111', 'CNZ', array(), array());
+					$this->RoundedRectXY($x, $y, $w, $h, $rx, $ry, '1111', $clip_operator, array(), array());
+					$this->SVGTransformInverse($tm);
+					++$this->svgclipshapes;
 				} else {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
@@ -24738,6 +25801,7 @@ class TCPDF {
 					if (!empty($obstyle)) {
 						$this->RoundedRectXY($x, $y, $w, $h, $rx, $ry, '1111', $obstyle, array(), array());
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				}
 				break;
@@ -24746,16 +25810,18 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$r = (isset($attribs['r']) ? $this->getHTMLUnitToUnits($attribs['r'], 0, $this->svgunit, false) : 0);
-				$cx = (isset($attribs['cx']) ? $this->getHTMLUnitToUnits($attribs['cx'], 0, $this->svgunit, false) : (isset($attribs['x']) ? $this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false) : 0));
-				$cy = (isset($attribs['cy']) ? $this->getHTMLUnitToUnits($attribs['cy'], 0, $this->svgunit, false) : (isset($attribs['y']) ? $this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false) : 0));
+				$r = (isset($attribs['r']) ? $this->getSVGLength($attribs['r'], 'd') : 0);
+				$cx = (isset($attribs['cx']) ? $this->getSVGLength($attribs['cx'], 'x') : (isset($attribs['x']) ? $this->getSVGLength($attribs['x'], 'x') : 0));
+				$cy = (isset($attribs['cy']) ? $this->getSVGLength($attribs['cy'], 'y') : (isset($attribs['y']) ? $this->getSVGLength($attribs['y'], 'y') : 0));
 				$x = ($cx - $r);
 				$y = ($cy - $r);
 				$w = (2 * $r);
 				$h = $w;
 				if ($clipping) {
 					$this->SVGTransform($tm);
-					$this->Circle($cx, $cy, $r, 0, 360, 'CNZ', array(), array(), 8);
+					$this->Circle($cx, $cy, $r, 0, 360, $clip_operator, array(), array(), 8);
+					$this->SVGTransformInverse($tm);
+					++$this->svgclipshapes;
 				} else {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
@@ -24763,6 +25829,7 @@ class TCPDF {
 					if (!empty($obstyle)) {
 						$this->Circle($cx, $cy, $r, 0, 360, $obstyle, array(), array(), 8);
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				}
 				
@@ -24772,17 +25839,19 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$rx = (isset($attribs['rx']) ? $this->getHTMLUnitToUnits($attribs['rx'], 0, $this->svgunit, false) : 0);
-				$ry = (isset($attribs['ry']) ? $this->getHTMLUnitToUnits($attribs['ry'], 0, $this->svgunit, false) : 0);
-				$cx = (isset($attribs['cx']) ? $this->getHTMLUnitToUnits($attribs['cx'], 0, $this->svgunit, false) : (isset($attribs['x']) ? $this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false) : 0));
-				$cy = (isset($attribs['cy']) ? $this->getHTMLUnitToUnits($attribs['cy'], 0, $this->svgunit, false) : (isset($attribs['y']) ? $this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false) : 0));
+				$rx = (isset($attribs['rx']) ? $this->getSVGLength($attribs['rx'], 'x') : 0);
+				$ry = (isset($attribs['ry']) ? $this->getSVGLength($attribs['ry'], 'y') : 0);
+				$cx = (isset($attribs['cx']) ? $this->getSVGLength($attribs['cx'], 'x') : (isset($attribs['x']) ? $this->getSVGLength($attribs['x'], 'x') : 0));
+				$cy = (isset($attribs['cy']) ? $this->getSVGLength($attribs['cy'], 'y') : (isset($attribs['y']) ? $this->getSVGLength($attribs['y'], 'y') : 0));
 				$x = ($cx - $rx);
 				$y = ($cy - $ry);
 				$w = (2 * $rx);
 				$h = (2 * $ry);
 				if ($clipping) {
 					$this->SVGTransform($tm);
-					$this->Ellipse($cx, $cy, $rx, $ry, 0, 0, 360, 'CNZ', array(), array(), 8);
+					$this->Ellipse($cx, $cy, $rx, $ry, 0, 0, 360, $clip_operator, array(), array(), 8);
+					$this->SVGTransformInverse($tm);
+					++$this->svgclipshapes;
 				} else {
 					$this->StartTransform();
 					$this->SVGTransform($tm);
@@ -24790,6 +25859,7 @@ class TCPDF {
 					if (!empty($obstyle)) {
 						$this->Ellipse($cx, $cy, $rx, $ry, 0, 0, 360, $obstyle, array(), array(), 8);
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				}
 				break;
@@ -24798,10 +25868,10 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				$x1 = (isset($attribs['x1'])?$this->getHTMLUnitToUnits($attribs['x1'], 0, $this->svgunit, false):0);
-				$y1 = (isset($attribs['y1'])?$this->getHTMLUnitToUnits($attribs['y1'], 0, $this->svgunit, false):0);
-				$x2 = (isset($attribs['x2'])?$this->getHTMLUnitToUnits($attribs['x2'], 0, $this->svgunit, false):0);
-				$y2 = (isset($attribs['y2'])?$this->getHTMLUnitToUnits($attribs['y2'], 0, $this->svgunit, false):0);
+				$x1 = (isset($attribs['x1'])?$this->getSVGLength($attribs['x1'], 'x'):0);
+				$y1 = (isset($attribs['y1'])?$this->getSVGLength($attribs['y1'], 'y'):0);
+				$x2 = (isset($attribs['x2'])?$this->getSVGLength($attribs['x2'], 'x'):0);
+				$y2 = (isset($attribs['y2'])?$this->getSVGLength($attribs['y2'], 'y'):0);
 				$x = $x1;
 				$y = $y1;
 				$w = abs($x2 - $x1);
@@ -24849,24 +25919,35 @@ class TCPDF {
 				$w = ($xmax - $xmin);
 				$h = ($ymax - $ymin);
 				if ($name == 'polyline') {
+					if ($clipping) {
+						$this->SVGTransform($tm);
+						$this->PolyLine($p, $clip_operator, array(), array());
+						$this->SVGTransformInverse($tm);
+						++$this->svgclipshapes;
+						break;
+					}
 					$this->StartTransform();
 					$this->SVGTransform($tm);
-					$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'PolyLine', array($p, 'CNZ'));
+					$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'PolyLine', array($p, $fill_clip_operator));
 					if (!empty($obstyle)) {
 						$this->PolyLine($p, $obstyle, array(), array());
 					}
+					$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 					$this->StopTransform();
 				} else { // polygon
 					if ($clipping) {
 						$this->SVGTransform($tm);
-						$this->Polygon($p, 'CNZ', array(), array(), true);
+						$this->Polygon($p, $clip_operator, array(), array(), true);
+						$this->SVGTransformInverse($tm);
+						++$this->svgclipshapes;
 					} else {
 						$this->StartTransform();
 						$this->SVGTransform($tm);
-						$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'Polygon', array($p, 'CNZ'));
+						$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, $w, $h, 'Polygon', array($p, $fill_clip_operator));
 						if (!empty($obstyle)) {
 							$this->Polygon($p, $obstyle, array(), array(), true);
 						}
+						$this->endSVGOpacityGroup((count($this->svgstyles) + 1));
 						$this->StopTransform();
 					}
 				}
@@ -24880,10 +25961,10 @@ class TCPDF {
 				if (!isset($attribs['xlink:href']) OR empty($attribs['xlink:href'])) {
 					break;
 				}
-				$x = (isset($attribs['x'])?$this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false):0);
-				$y = (isset($attribs['y'])?$this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false):0);
-				$w = (isset($attribs['width'])?$this->getHTMLUnitToUnits($attribs['width'], 0, $this->svgunit, false):0);
-				$h = (isset($attribs['height'])?$this->getHTMLUnitToUnits($attribs['height'], 0, $this->svgunit, false):0);
+				$x = (isset($attribs['x'])?$this->getSVGLength($attribs['x'], 'x'):0);
+				$y = (isset($attribs['y'])?$this->getSVGLength($attribs['y'], 'y'):0);
+				$w = (isset($attribs['width'])?$this->getSVGLength($attribs['width'], 'x'):0);
+				$h = (isset($attribs['height'])?$this->getSVGLength($attribs['height'], 'y'):0);
 				$img = $attribs['xlink:href'];
 				if (!$clipping) {
 					$this->StartTransform();
@@ -24937,6 +26018,18 @@ class TCPDF {
 						$svgclipid = $this->svgclipid;
 						$svgtext = $this->svgtext;
 						$svgtextmode = $this->svgtextmode;
+						$svgpatterns = $this->svgpatterns;
+						$svgpatternrecord = $this->svgpatternrecord;
+						$svgpatternstack = $this->svgpatternstack;
+						$svgpatterntiles = $this->svgpatterntiles;
+						$svgclipstyles = $this->svgclipstyles;
+						$svgviewport = $this->svgviewport;
+						$svgviewports = $this->svgviewports;
+						$svggroupstack = $this->svggroupstack;
+						$svgcssrules = $this->svgcssrules;
+						$svgstyles = $this->svgstyles;
+						$svg_tag_depth = $this->svg_tag_depth;
+						$svgancestors = $this->svgancestors;
 						$this->ImageSVG($img, $x, $y, $w, $h);
 						// restore SVG vars
 						$this->svggradients = $svggradients;
@@ -24949,6 +26042,18 @@ class TCPDF {
 						$this->svgclipid = $svgclipid;
 						$this->svgtext = $svgtext;
 						$this->svgtextmode = $svgtextmode;
+						$this->svgpatterns = $svgpatterns;
+						$this->svgpatternrecord = $svgpatternrecord;
+						$this->svgpatternstack = $svgpatternstack;
+						$this->svgpatterntiles = $svgpatterntiles;
+						$this->svgclipstyles = $svgclipstyles;
+						$this->svgviewport = $svgviewport;
+						$this->svgviewports = $svgviewports;
+						$this->svggroupstack = $svggroupstack;
+						$this->svgcssrules = $svgcssrules;
+						$this->svgstyles = $svgstyles;
+						$this->svg_tag_depth = $svg_tag_depth;
+						$this->svgancestors = $svgancestors;
 					} else {
 						$this->Image($img, $x, $y, $w, $h);
 					}
@@ -24967,28 +26072,37 @@ class TCPDF {
 				if ($invisible) {
 					break;
 				}
-				array_push($this->svgstyles, $svgstyle);
+				if (!$clipping) {
+					array_push($this->svgstyles, $svgstyle);
+				}
 				if (isset($attribs['x'])) {
-					$x = $this->getHTMLUnitToUnits($attribs['x'], 0, $this->svgunit, false);
+					$x = $this->getSVGLength($attribs['x'], 'x');
 				} elseif ($name == 'tspan') {
 					$x = $this->x;
 				} else {
 					$x = 0;
 				}
 				if (isset($attribs['dx'])) {
-					$x += $this->getHTMLUnitToUnits($attribs['dx'], 0, $this->svgunit, false);
+					$x += $this->getSVGLength($attribs['dx'], 'x');
 				}
 				if (isset($attribs['y'])) {
-					$y = $this->getHTMLUnitToUnits($attribs['y'], 0, $this->svgunit, false);
+					$y = $this->getSVGLength($attribs['y'], 'y');
 				} elseif ($name == 'tspan') {
 					$y = $this->y;
 				} else {
 					$y = 0;
 				}
 				if (isset($attribs['dy'])) {
-					$y += $this->getHTMLUnitToUnits($attribs['dy'], 0, $this->svgunit, false);
+					$y += $this->getSVGLength($attribs['dy'], 'y');
 				}
-				$svgstyle['text-color'] = $svgstyle['fill'];
+				if ($clipping) {
+					$this->SVGClipText($name, $x, $y, $tm, $svgstyle, $prev_svgstyle);
+					break;
+				}
+				// text is filled with the first colour of a gradient
+				$fill_paint = $this->getSVGPaint($svgstyle['fill'], $svgstyle);
+				$text_paint = $this->getSVGSolidPaint($fill_paint, $svgstyle);
+				$svgstyle['text-color'] = ($text_paint['type'] == 'color') ? $text_paint['color'] : $svgstyle['fill'];
 				$this->svgtext = '';
 				if (isset($svgstyle['text-anchor'])) {
 					$this->svgtextmode['text-anchor'] = $svgstyle['text-anchor'];
@@ -25005,48 +26119,68 @@ class TCPDF {
 					$this->svgtextmode['rtl'] = false;
 				}
 				if (isset($svgstyle['stroke']) AND ($svgstyle['stroke'] != 'none') AND isset($svgstyle['stroke-width']) AND ($svgstyle['stroke-width'] > 0)) {
-					$this->svgtextmode['stroke'] = $this->getHTMLUnitToUnits($svgstyle['stroke-width'], 0, $this->svgunit, false);
+					$this->svgtextmode['stroke'] = $this->getSVGLength($svgstyle['stroke-width'], 'd');
 				} else {
 					$this->svgtextmode['stroke'] = false;
 				}
 				$this->StartTransform();
 				$this->SVGTransform($tm);
 				$obstyle = $this->setSVGStyles($svgstyle, $prev_svgstyle, $x, $y, 1, 1);
+				if (($fill_paint['type'] == 'gradient') AND ($text_paint['type'] == 'color')) {
+					// setSVGStyles() paints no gradient outside a shape, so its fill opacity is set here
+					$text_opacity = $this->getSVGOpacity($svgstyle['opacity']) * $this->getSVGOpacity($svgstyle['fill-opacity']) * $this->getSVGOpacity($text_paint['opacity']);
+					if ($text_opacity != 1) {
+						$this->setAlpha($this->alpha['CA'], 'Normal', $text_opacity, false);
+					}
+				}
 				$this->x = $x;
 				$this->y = $y;
 				break;
 			}
 			// use
 			case 'use': {
-				if (isset($attribs['xlink:href']) AND !empty($attribs['xlink:href'])) {
-					$svgdefid = substr($attribs['xlink:href'], 1);
-					if (isset($this->svgdefs[$svgdefid])) {
-						$use = $this->svgdefs[$svgdefid];
-						if (isset($attribs['xlink:href'])) {
-							unset($attribs['xlink:href']);
-						}
-						if (isset($attribs['id'])) {
-							unset($attribs['id']);
-						}
-						if (isset($use['attribs']['x']) AND isset($attribs['x'])) {
-							$attribs['x'] += $use['attribs']['x'];
-						}
-						if (isset($use['attribs']['y']) AND isset($attribs['y'])) {
-							$attribs['y'] += $use['attribs']['y'];
-						}
-						if (empty($attribs['style'])) {
-							$attribs['style'] = '';
-						}
-						if (!empty($use['attribs']['style'])) {
-							// merge styles
-							$attribs['style'] = str_replace(';;',';',';'.$use['attribs']['style'].$attribs['style']);
-						}
-						$attribs = array_merge($use['attribs'], $attribs);
-						$this->startSVGElementHandler($parser, $use['name'], $attribs);
-						return;
-					}
+				if (empty($attribs['xlink:href']) OR ($svgstyle['display'] == 'none')) {
+					break;
 				}
-				break;
+				$svgdefid = substr($attribs['xlink:href'], 1);
+				if (!isset($this->svgdefs[$svgdefid])) {
+					break;
+				}
+				$use = $this->svgdefs[$svgdefid];
+				// the use element draws like a group around the element it uses: its transform, then its x and y,
+				// then the element's own transform; the element inherits from it, its style rules already applied
+				// where it is defined
+				$unit = $this->getSVGUnitScale();
+				$use_x = isset($attribs['x']) ? ($this->getSVGLength($attribs['x'], 'x') / $unit) : 0;
+				$use_y = isset($attribs['y']) ? ($this->getSVGLength($attribs['y'], 'y') / $unit) : 0;
+				$tm = TCPDF_STATIC::getTransformationMatrixProduct($tm, array(1, 0, 0, 1, $use_x, $use_y));
+				array_push($this->svgstyles, $svgstyle);
+				if ($clipping) {
+					// in a clip path a use clips with the shape or text it uses and adds nothing for anything else;
+					// a clip path cannot be drawn inside a saved graphics state, so the matrix is passed on
+					if (in_array($use['name'], array('path', 'rect', 'circle', 'ellipse', 'line', 'polyline', 'polygon', 'text'))) {
+						// a used text keeps its characters with its closing tag
+						$cliptext = $this->svgcliptext;
+						$this->svgcliptext = '';
+						foreach ((isset($use['attribs']['child_elements']) ? $use['attribs']['child_elements'] : array()) as $child) {
+							if (!empty($child['attribs']['closing_tag']) AND ($child['name'] == 'text') AND isset($child['attribs']['content'])) {
+								$this->svgcliptext = $child['attribs']['content'];
+							}
+						}
+						$this->startSVGElementHandler('clip-path', $use['name'], $use['attribs'], $tm);
+						$this->svgcliptext = $cliptext;
+					}
+				} else {
+					$this->StartTransform();
+					$this->SVGTransform($tm);
+					$this->setSVGStyles($svgstyle, $prev_svgstyle);
+					$this->startSVGOpacityGroup($svgstyle['opacity']);
+					$this->startSVGElementHandler('use', $use['name'], $use['attribs']);
+					$this->endSVGOpacityGroup();
+					$this->StopTransform();
+				}
+				array_pop($this->svgstyles);
+				return;
 			}
 			default: {
 				break;
@@ -25079,6 +26213,30 @@ class TCPDF {
 	 */
 	protected function endSVGElementHandler($parser, $name) {
 		$name = $this->removeTagNamespace($name);
+		if (!is_string($parser) AND !empty($this->svgcssrules)) {
+			array_pop($this->svgancestors);
+		}
+		if (!empty($this->svgpatternrecord)) {
+			if ($name == 'pattern') {
+				if ($this->svgpatternrecord['depth'] == 0) {
+					$this->svgpatternrecord = array();
+					return;
+				}
+				--$this->svgpatternrecord['depth'];
+			}
+			$this->svgpatterns[$this->svgpatternrecord['id']]['children'][] = array('end', $name);
+			return;
+		}
+		if ($this->svgclipmode AND (($this->svgclipskip > 0) OR ($name != 'clipPath'))) {
+			// the elements of a clip path are only recorded, and drawn where it clips
+			if ($this->svgclipskip > 0) {
+				--$this->svgclipskip;
+			} elseif ((($name == 'text') OR ($name == 'tspan')) AND !empty($this->svgcliptexts)) {
+				$this->svgclippaths[$this->svgclipid][array_pop($this->svgcliptexts)]['text'] = $this->svgtext;
+				$this->svgtext = '';
+			}
+			return;
+		}
 		if ($this->svgdefsmode AND !in_array($name, array('defs', 'clipPath', 'linearGradient', 'radialGradient', 'stop'))) {
 			if (end($this->svgdefs) !== FALSE) {
 				$last_svgdefs_id = key($this->svgdefs);
@@ -25109,10 +26267,16 @@ class TCPDF {
 			}
 			case 'svg': {
 				if (--$this->svg_tag_depth <= 0) {
+					array_pop($this->svgstyles);
 					break;
+				}
+				// back to the viewport around the inner svg
+				if (!empty($this->svgviewports)) {
+					$this->svgviewport = array_pop($this->svgviewports);
 				}
 			}
 			case 'g': {
+				$this->endSVGOpacityGroup();
 				// ungroup: remove last style from array
 				array_pop($this->svgstyles);
 				$this->StopTransform();
@@ -25185,6 +26349,10 @@ class TCPDF {
 	 * @protected
 	 */
 	protected function segSVGContentHandler($parser, $data) {
+		if (!empty($this->svgpatternrecord)) {
+			$this->svgpatterns[$this->svgpatternrecord['id']]['children'][] = array('text', $data);
+			return;
+		}
 		$this->svgtext .= $data;
 	}
 
