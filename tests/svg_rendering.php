@@ -41,9 +41,20 @@ class SvgRenderingPdf extends TCPDF
     }
 }
 
-function createPdf()
+/**
+ * A page whose errors throw without tearing the document down, as an application catching them does.
+ */
+class ThrowingSvgRenderingPdf extends SvgRenderingPdf
 {
-    $pdf = new SvgRenderingPdf('P', 'pt', array(100, 100), true, 'UTF-8', false);
+    public function Error($msg)
+    {
+        throw new RuntimeException($msg);
+    }
+}
+
+function createPdf($class = 'SvgRenderingPdf')
+{
+    $pdf = new $class('P', 'pt', array(100, 100), true, 'UTF-8', false);
     $pdf->setPrintHeader(false);
     $pdf->setPrintFooter(false);
     $pdf->setCompression(false);
@@ -194,6 +205,24 @@ $image = render(svg('<defs><clipPath id="ring"><path d="M20 20H80V80H20ZM35 35H6
     . '<rect clip-path="url(#ring)" width="100" height="100" fill="red"/>'));
 check('a nonzero clip path fills its inner square drawn the same way round', near(pixel($image, 50, 50), RED));
 
+$image = render(svg('<defs><clipPath id="ring" clip-rule="evenodd"><path d="M20 20H80V80H20ZM35 35H65V65H35Z"/></clipPath></defs>'
+    . '<rect clip-path="url(#ring)" width="100" height="100" fill="red"/>'));
+check('clip-rule on the clipPath element applies to the paths inside it', near(pixel($image, 25, 50), RED) && near(pixel($image, 50, 50), WHITE));
+
+$image = render(svg('<defs><clipPath id="ring"><path d="M20 20H80V80H20ZM35 35H65V65H35Z"/></clipPath></defs>'
+    . '<g clip-rule="evenodd"><rect clip-path="url(#ring)" width="100" height="100" fill="red"/></g>'));
+check('clip-rule inherited by the clipped element does not reach the clip path', near(pixel($image, 50, 50), RED));
+
+$image = render(svg('<defs><rect id="half" width="50" height="100"/></defs><clipPath id="c"><use xlink:href="#half"/></clipPath>'
+    . '<g clip-path="url(#c)"><rect width="100" height="100" fill="red"/></g>'), $content);
+check('a use inside a clip path clips to the element it uses', near(pixel($image, 25, 50), RED) && near(pixel($image, 75, 50), WHITE));
+check('a use inside a clip path leaves q and Q balanced', balanced($content));
+
+$image = render(svg('<defs><rect id="half" width="50" height="100"/><clipPath id="c" transform="translate(0,50)"><use href="#half" x="50"/></clipPath></defs>'
+    . '<rect clip-path="url(#c)" width="100" height="100" fill="red"/>'));
+check('a use inside a transformed clip path moves by its x and the clip path\'s transform',
+    near(pixel($image, 75, 75), RED) && near(pixel($image, 25, 75), WHITE) && near(pixel($image, 75, 25), WHITE));
+
 // --- linear gradients ------------------------------------------------------------------
 
 $image = render(svg('<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#ff0000"/>'
@@ -224,6 +253,35 @@ check('a vertical gradient off the middle of the shape starts and ends where it 
 $image = render(svg('<defs><linearGradient id="g"><stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#ff0000"/></linearGradient></defs>'
     . '<path d="M20 20H80V80H20ZM35 35H65V65H35Z" fill-rule="evenodd" fill="url(#g)"/>'));
 check('a gradient fill keeps the hole of an even-odd shape', near(pixel($image, 25, 50), RED) && near(pixel($image, 50, 50), WHITE));
+
+$fading = '<defs><linearGradient id="fade"><stop offset="0" stop-color="#0000ff" stop-opacity="0.5"/><stop offset="1" stop-color="#ff0000"/></linearGradient></defs>';
+
+$image = render(svg($fading . '<rect x="20" y="20" width="60" height="60" fill="none" stroke="url(#fade)" stroke-width="10"/>'));
+check('a gradient stroke drawn in its first stop keeps the opacity of that stop', near(pixel($image, 20, 50), array(128, 128, 255), 30));
+
+/**
+ * Whether the page shows some colour other than white, and nothing but white and that colour.
+ */
+function paintedOnlyIn($image, $colour)
+{
+    $painted = 0;
+    for ($y = 0; $y < 100; ++$y) {
+        for ($x = 0; $x < 100; ++$x) {
+            $found = pixel($image, $x, $y);
+            if (near($found, WHITE, 10)) {
+                continue;
+            }
+            if (!near($found, $colour, 30)) {
+                return false;
+            }
+            ++$painted;
+        }
+    }
+    return $painted > 50;
+}
+
+$image = render(svg($fading . '<text x="10" y="90" font-size="100" font-weight="bold" fill="url(#fade)">I</text>'));
+check('text filled with a gradient keeps the opacity of its first stop', paintedOnlyIn($image, array(128, 128, 255)));
 
 // --- patterns --------------------------------------------------------------------------
 
@@ -278,6 +336,37 @@ check('a pattern draws inside an XObject template', near(pixel($image, 2, 50), B
 $image = render(svg('<defs><pattern id="p" width="0.001" height="0.001" patternUnits="userSpaceOnUse"><rect width="0.0005" height="0.001" fill="#0000ff"/></pattern></defs>'
     . '<rect width="100" height="100" fill="url(#p) #00ff00"/>'), $content);
 check('a pattern with too many tiles falls back instead of drawing them', near(pixel($image, 50, 50), GREEN) && strlen($content) < 20000);
+
+$image = render(svg('<defs><pattern id="p" width="10" height="10" patternUnits="userSpaceOnUse" fill="#00ff00"><rect width="5" height="10"/></pattern></defs>'
+    . '<rect width="100" height="100" fill="url(#p)"/>'));
+check('pattern content inherits the properties of the pattern element', near(pixel($image, 2, 50), GREEN) && near(pixel($image, 7, 50), WHITE));
+
+$image = render('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="#0000ff"><defs><pattern id="p" width="10" height="10" patternUnits="userSpaceOnUse">'
+    . '<rect width="5" height="10"/></pattern></defs><rect width="100" height="100" fill="url(#p)"/></svg>');
+check('pattern content inherits from the ancestors of the pattern element', near(pixel($image, 2, 50), BLUE) && near(pixel($image, 7, 50), WHITE));
+
+$image = render(svg('<defs><pattern id="p" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="#0000ff" fill-opacity="0.5"/></pattern></defs>'
+    . '<rect width="100" height="100" fill="url(#p)" fill-opacity="0.5"/>'));
+check('the opacity of a pattern fill multiplies the opacity inside its tile', near(pixel($image, 50, 50), array(191, 191, 255), 20));
+
+$image = render(svg($stripes . '<rect width="50" height="50" fill="url(#p)"/><rect x="50" y="50" width="50" height="50" fill="url(#p)"/>'), $content);
+check('shapes filled with the same user-space pattern share one tile', preg_match_all('/\/(XT\d+) Do/', $content, $m) && (count(array_unique($m[1])) === 1)
+    && near(pixel($image, 2, 25), BLUE) && near(pixel($image, 52, 75), BLUE));
+
+$image = render(svg('<defs><pattern id="q" width="50" height="50" patternUnits="userSpaceOnUse"><rect width="25" height="50" fill="#0000ff"/></pattern></defs>'
+    . '<rect width="100" height="100" fill="url(#q)"/>'), $content);
+check('a shape that ends on a tile edge lays no tile beyond it', (substr_count($content, ' Do') === 4) && near(pixel($image, 60, 60), BLUE) && near(pixel($image, 80, 60), WHITE));
+
+$pdf = createPdf('ThrowingSvgRenderingPdf');
+try {
+    $pdf->ImageSVG('@' . svg('<defs><pattern id="p" width="10" height="10" patternUnits="userSpaceOnUse"><image href="data:image/png;base64,AAAA"/></pattern></defs>'
+        . '<rect width="50" height="50" fill="url(#p)"/>'), 0, 0, 100, 100);
+    $thrown = false;
+} catch (RuntimeException $e) {
+    $thrown = true;
+}
+$pdf->Rect(60, 60, 30, 30, 'F', array(), array(255, 0, 0));
+check('an error inside a pattern tile leaves later output on the page', $thrown && near(pixel(rasterize($pdf), 75, 75), RED));
 
 // --- paint server fallbacks ------------------------------------------------------------
 
@@ -359,6 +448,25 @@ check('a rule can fill with a pattern', near(pixel($image, 2, 50), BLUE) && near
 $image = render(svg('<style>.a{fill:#0000ff}</style><defs><rect id="r" class="a" width="40" height="40"/></defs><use href="#r" x="50" y="50"/>'));
 check('a rule styles a used element', near(pixel($image, 70, 70), BLUE));
 
+$image = render(svg('<!-- <style>rect{fill:#ff0000}</style> --><rect width="50" height="50" fill="#0000ff"/>'));
+check('a style element inside a comment is not applied', near(pixel($image, 25, 25), BLUE));
+
+$image = render(svg('<script><![CDATA[ var css = "<style>rect{fill:#ff0000}</style>"; ]]></script><rect width="50" height="50" fill="#0000ff"/>'));
+check('a style element written inside a CDATA section is not applied', near(pixel($image, 25, 25), BLUE));
+
+$image = render(svg('<style>g &gt; rect{fill:#0000ff}</style><g><rect width="50" height="50"/></g>'));
+check('character references in a style element are decoded', near(pixel($image, 25, 25), BLUE));
+
+$image = render(svg('<style>.v{fill:var(--c,#0000ff)} .n{fill:var(--c)} .o{fill:oklch(60% 0.2 30)} .i{fill:initial}</style>'
+    . '<rect class="v" width="50" height="50" fill="#ff0000"/><rect class="n" x="50" width="50" height="50" fill="#0000ff"/>'
+    . '<rect class="o" y="50" width="50" height="50" fill="#0000ff"/><rect class="i" x="50" y="50" width="50" height="50" fill="#0000ff"/>'));
+check('a var() in a rule paints its fallback', near(pixel($image, 25, 25), BLUE));
+check('a rule value TCPDF cannot read leaves the presentation attribute', near(pixel($image, 75, 25), BLUE) && near(pixel($image, 25, 75), BLUE));
+check('initial in a rule sets the initial value', near(pixel($image, 75, 75), BLACK));
+
+$image = render(svg('<rect style="fill:var(--c)" width="50" height="50" fill="#0000ff"/>'));
+check('an inline style value TCPDF cannot read leaves the presentation attribute', near(pixel($image, 25, 25), BLUE));
+
 // --- href without xlink ----------------------------------------------------------------
 
 $image = render(svg('<defs><rect id="r" width="40" height="40" fill="#0000ff"/></defs><use href="#r" x="50" y="50"/>'));
@@ -377,6 +485,33 @@ $image = render(svg('<defs><rect id="r" width="20" height="20" transform="transl
     . '<use href="#r" x="50" y="50" transform="translate(-20,-20)"/>'));
 check('use applies its transform, then x and y, then the element\'s own transform', near(pixel($image, 50, 40), BLUE) && near(pixel($image, 35, 40), WHITE)
     && near(pixel($image, 70, 60), WHITE));
+
+$image = render(svg('<defs><rect id="r" width="10" height="40" fill="#0000ff"/></defs><rect x="10mm" width="10" height="40" fill="#0000ff"/><use href="#r" x="10mm" y="50"/>'));
+$rect_left = null;
+$use_left = null;
+for ($x = 0; $x < 100; ++$x) {
+    if (($rect_left === null) && near(pixel($image, $x, 20), BLUE)) {
+        $rect_left = $x;
+    }
+    if (($use_left === null) && near(pixel($image, $x, 70), BLUE)) {
+        $use_left = $x;
+    }
+}
+check('use x with a unit moves as far as a rect x with that unit', ($rect_left !== null) && ($rect_left > 15) && ($rect_left === $use_left));
+
+$image = render('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><defs><rect id="r" width="20" height="200" fill="#0000ff"/></defs><use href="#r" x="50%"/></svg>');
+check('use x as a percentage is a share of the viewport width', near(pixel($image, 55, 50), BLUE) && near(pixel($image, 45, 50), WHITE) && near(pixel($image, 30, 50), WHITE));
+
+$image = render(svg('<defs><rect id="r" width="40" height="40" fill="#0000ff" display="inline" opacity="1"/></defs>'
+    . '<use href="#r" display="none"/><use href="#r" x="50" y="50" opacity="0.5"/>'));
+check('display none on a use hides what it uses', near(pixel($image, 20, 20), WHITE));
+check('opacity on a use applies to what it uses', near(pixel($image, 70, 70), array(128, 128, 255), 30));
+
+$image = render(svg('<defs><clipPath id="left"><rect width="20" height="100"/></clipPath><clipPath id="top"><rect width="100" height="20"/></clipPath>'
+    . '<rect id="r" width="40" height="40" fill="#0000ff" clip-path="url(#top)"/></defs><use href="#r" clip-path="url(#left)"/>'), $content);
+check('a use clips what it uses, also when that has a clip path of its own', near(pixel($image, 10, 10), BLUE) && near(pixel($image, 30, 10), WHITE)
+    && near(pixel($image, 10, 30), WHITE));
+check('a clipped use leaves q and Q balanced', balanced($content));
 
 $image = render('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" stroke="#0000ff" stroke-width="10" color="#00ff00">'
     . '<rect x="10" y="10" width="40" height="40"/><circle cx="75" cy="75" r="15" fill="currentColor" stroke="none"/></svg>');
