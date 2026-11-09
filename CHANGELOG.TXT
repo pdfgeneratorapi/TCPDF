@@ -1,3 +1,7 @@
+6.11.3.3 (2026-11-09)
+	- Fixed: an SVG image element whose data URI holds an SVG drew nothing; the data URI's media type now gives the image type, so the SVG is drawn as vectors. Media type parameters before ;base64, and percent-encoded text payloads, are read too.
+	- Fixed: an SVG image element skipped for a path that leaves its folder, or for a forbidden protocol, left a graphics state saved, unbalancing q and Q.
+
 6.11.3.2 (2026-11-09)
 	- Added SVG pattern fills: the tile is drawn once, as a transparency group XObject, and laid as many times as it takes to cover the shape, also inside an XObject template; patternUnits, patternContentUnits, viewBox, preserveAspectRatio, patternTransform and href are read, and setSVGPatternTileLimit() caps the tiles one fill may lay before it paints its fallback colour.
 	- Added SVG style rules: type, universal, class and id selectors, joined by descendant or child combinators, in cascade order; a rule beats a presentation attribute and the style attribute beats a rule. A var() takes its fallback, initial and unset resolve, and a value TCPDF cannot read is left out.
