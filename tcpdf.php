@@ -1,7 +1,7 @@
 <?php
 //============================================================+
 // File name   : tcpdf.php
-// Version     : 6.11.3.3
+// Version     : 6.11.3.4
 // Begin       : 2002-08-03
 // Last Update : 2026-03-03
 // Author      : Nicola Asuni - Tecnick.com LTD - www.tecnick.com - info@tecnick.com
@@ -104,7 +104,7 @@
  * Tools to encode your unicode fonts are on fonts/utils directory.</p>
  * @package com.tecnick.tcpdf
  * @author Nicola Asuni
- * @version 6.11.3.3
+ * @version 6.11.3.4
  */
 
 // TCPDF configuration
@@ -128,7 +128,7 @@ require_once(dirname(__FILE__).'/include/tcpdf_static.php');
  * TCPDF project (http://www.tcpdf.org) has been originally derived in 2002 from the Public Domain FPDF class by Olivier Plathey (http://www.fpdf.org), but now is almost entirely rewritten.<br>
  * @package com.tecnick.tcpdf
  * @brief PHP class for generating PDF documents without requiring external extensions.
- * @version 6.11.3.3
+ * @version 6.11.3.4
  * @author Nicola Asuni - info@tecnick.com
  * @IgnoreAnnotation("protected")
  * @IgnoreAnnotation("public")
@@ -24740,14 +24740,27 @@ class TCPDF {
 		if ($fill['type'] == 'gradient') {
 			//save current Graphic State
 			$this->_outSaveGraphicsState();
+			// a bounding-box radial gradient is drawn in a unit square stretched over the shape's box, as browsers draw it
+			$box_radial = (isset($gradient['type']) AND ($gradient['type'] == 3) AND ($gradient['gradientUnits'] == 'objectBoundingBox'));
 			//set clipping area
 			if (!empty($clip_function) AND method_exists($this, $clip_function)) {
 				$bbox = call_user_func_array(array($this, $clip_function), $clip_params);
-				if ((!isset($gradient['type']) OR ($gradient['type'] != 3)) AND is_array($bbox) AND (count($bbox) == 4)) {
+				if ((!isset($gradient['type']) OR ($gradient['type'] != 3) OR $box_radial) AND is_array($bbox) AND (count($bbox) == 4)) {
 					list($x, $y, $w, $h) = $bbox;
 				}
 			}
-			if ($gradient['mode'] == 'measure') {
+			if ($box_radial) {
+				// PDF paints a radial shading from its focal point out to its circle; a radius of 0 paints the last stop
+				list($gcx, $gcy, $gfx, $gfy, $gr) = $gradient['coords'];
+				$gr = max($gr, 0.000001);
+				$focal = sqrt(pow(($gfx - $gcx), 2) + pow(($gfy - $gcy), 2));
+				if ($focal > ($gr * 0.999)) {
+					// a focal point outside the circle is moved onto it, as SVG 1.1 does
+					$gfx = $gcx + (($gfx - $gcx) * $gr * 0.999 / $focal);
+					$gfy = $gcy + (($gfy - $gcy) * $gr * 0.999 / $focal);
+				}
+				$gradient['coords'] = array($gfx, $gfy, $gcx, $gcy, $gr);
+			} elseif ($gradient['mode'] == 'measure') {
 				if (!isset($gradient['coords'][4])) {
 					$gradient['coords'][4] = 0.5;
 				}
@@ -24821,7 +24834,7 @@ class TCPDF {
 				// the gradient box is drawn with y up
 				$gradient['coords'][1] = 1 - $gradient['coords'][1];
 				$gradient['coords'][3] = 1 - $gradient['coords'][3];
-			} else {
+			} elseif (!$box_radial) {
 				// swap Y coordinates
 				$tmp = $gradient['coords'][1];
 				$gradient['coords'][1] = $gradient['coords'][3];
@@ -24829,16 +24842,32 @@ class TCPDF {
 			}
 			// set transformation map for gradient
 			$cy = ($this->h - $y);
-			if ($gradient['type'] == 3) {
-				// circular gradient
-				$cy -= ($gradient['coords'][1] * ($w + $h));
-				$h = $w = max($w, $h);
+			$painted = true;
+			if ($box_radial) {
+				// y down, as in SVG; a shape with no width or no height paints nothing
+				$painted = (($w > 0) AND ($h > 0));
+				if ($painted) {
+					$this->_out(sprintf('%F 0 0 %F %F %F cm', ($w * $this->k), (-$h * $this->k), ($x * $this->k), ($cy * $this->k)));
+					if (!empty($gradient['gradientTransform'])) {
+						// a bounding-box gradient transform is in fractions of the box, like the coordinates
+						$this->_out(vsprintf('%F %F %F %F %F %F cm', $gradient['gradientTransform']));
+					}
+				}
 			} else {
-				$cy -= $h;
+				if ($gradient['type'] == 3) {
+					// circular gradient
+					$cy -= ($gradient['coords'][1] * ($w + $h));
+					$h = $w = max($w, $h);
+				} else {
+					$cy -= $h;
+				}
+				$this->_out(sprintf('%F 0 0 %F %F %F cm', ($w * $this->k), ($h * $this->k), ($x * $this->k), ($cy * $this->k)));
 			}
-			$this->_out(sprintf('%F 0 0 %F %F %F cm', ($w * $this->k), ($h * $this->k), ($x * $this->k), ($cy * $this->k)));
-			if ((is_array($gradient['stops']) || $gradient['stops'] instanceof Countable) && count($gradient['stops']) > 1) {
+			if ($painted && (is_array($gradient['stops']) || $gradient['stops'] instanceof Countable) && count($gradient['stops']) > 1) {
 				$this->Gradient($gradient['type'], $gradient['coords'], $gradient['stops']);
+			} elseif (!$painted) {
+				// Gradient() restores the graphic state it paints in
+				$this->_outRestoreGraphicsState();
 			}
 		} elseif ($fill['type'] == 'color') {
 			$fill_color = is_array($fill['color']) ? $fill['color'] : TCPDF_COLORS::convertHTMLColorToDec($fill['color'], $this->spot_colors);
@@ -25721,6 +25750,15 @@ class TCPDF {
 				$fx = (isset($attribs['fx']) ? $attribs['fx'] : $cx);
 				$fy = (isset($attribs['fy']) ? $attribs['fy'] : $cy);
 				$r = (isset($attribs['r']) ? $attribs['r'] : 0.5);
+				if ($this->svggradients[$this->svggradientid]['gradientUnits'] == 'objectBoundingBox') {
+					// fractions of the bounding box of the shape, plain or as percentages, 50% when left out
+					$this->svggradients[$this->svggradientid]['mode'] = 'ratio';
+					$cx = $this->getSVGFraction($attribs, 'cx', 0.5);
+					$cy = $this->getSVGFraction($attribs, 'cy', 0.5);
+					$fx = $this->getSVGFraction($attribs, 'fx', $cx);
+					$fy = $this->getSVGFraction($attribs, 'fy', $cy);
+					$r = $this->getSVGFraction($attribs, 'r', 0.5);
+				}
 				if (isset($attribs['gradientTransform'])) {
 					$this->svggradients[$this->svggradientid]['gradientTransform'] = TCPDF_STATIC::getSVGTransformMatrix($attribs['gradientTransform']);
 				}
@@ -25733,7 +25771,9 @@ class TCPDF {
 			}
 			case 'stop': {
 				// gradient stops
-				if (substr($attribs['offset'], -1) == '%') {
+				if (!isset($attribs['offset'])) {
+					$offset = 0;
+				} elseif (substr($attribs['offset'], -1) == '%') {
 					$offset = floatval(substr($attribs['offset'], 0, -1)) / 100;
 				} else {
 					$offset = floatval($attribs['offset']);

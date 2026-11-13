@@ -296,6 +296,101 @@ $fading = '<defs><linearGradient id="fade"><stop offset="0" stop-color="#0000ff"
 $image = render(svg($fading . '<rect x="20" y="20" width="60" height="60" fill="none" stroke="url(#fade)" stroke-width="10"/>'));
 check('a gradient stroke drawn in its first stop keeps the opacity of that stop', near(pixel($image, 20, 50), array(128, 128, 255), 30));
 
+// --- radial gradients ------------------------------------------------------------------
+
+/**
+ * Draws a shape filled with a red-to-blue radial gradient, or with the given stops.
+ */
+function radial($attributes, $shape, $stops = null, &$content = null)
+{
+    if ($stops === null) {
+        $stops = '<stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>';
+    }
+    return render(svg('<defs><radialGradient id="r"' . $attributes . '>' . $stops . '</radialGradient></defs>' . $shape), $content);
+}
+
+/**
+ * Whether a colour lies about halfway between red and blue.
+ */
+function between($colour)
+{
+    return $colour !== null && $colour[0] > 70 && $colour[0] < 185 && $colour[2] > 70 && $colour[2] < 185;
+}
+
+$square = '<rect width="100" height="100" fill="url(#r)"/>';
+
+foreach (array('no centre or radius' => '', 'fractions' => ' cx="0.5" cy="0.5" r="0.5"', 'percentages' => ' cx="50%" cy="50%" r="50%"') as $name => $attributes) {
+    $image = radial($attributes, $square, null, $content);
+    check('a bounding-box radial gradient with ' . $name . ' is centred in its shape with half its size as radius',
+        near(pixel($image, 50, 50), RED, 60) && between(pixel($image, 50, 25)) && between(pixel($image, 75, 50))
+        && near(pixel($image, 97, 50), BLUE, 60) && near(pixel($image, 3, 3), BLUE, 60));
+    check('a bounding-box radial gradient with ' . $name . ' leaves q and Q balanced', balanced($content));
+}
+
+$image = radial('', '<rect y="25" width="100" height="50" fill="url(#r)"/>');
+check('a bounding-box radial gradient is stretched to a wide shape, reaching its last stop at the top and the sides',
+    near(pixel($image, 50, 50), RED, 60) && between(pixel($image, 25, 50)) && between(pixel($image, 50, 37))
+    && near(pixel($image, 50, 27), BLUE, 60) && near(pixel($image, 97, 50), BLUE, 60) && near(pixel($image, 50, 10), WHITE));
+
+$image = radial('', '<rect x="50" y="50" width="50" height="50" fill="url(#r)"/>');
+check('a bounding-box radial gradient is centred in a shape away from the origin',
+    near(pixel($image, 75, 75), RED, 60) && near(pixel($image, 75, 52), BLUE, 60) && near(pixel($image, 52, 75), BLUE, 60)
+    && near(pixel($image, 25, 25), WHITE));
+
+$image = radial(' cx="0.25" cy="0.25" r="0.25"', $square);
+check('a bounding-box radial gradient off the centre is drawn where it says',
+    near(pixel($image, 25, 25), RED, 60) && between(pixel($image, 25, 37)) && near(pixel($image, 25, 51), BLUE, 60)
+    && near(pixel($image, 75, 75), BLUE, 60));
+
+$image = radial(' fx="0.25"', $square);
+$middle = pixel($image, 50, 50);
+check('a radial gradient starts at its focal point and ends on its circle',
+    near(pixel($image, 25, 50), RED, 60) && near(pixel($image, 97, 50), BLUE, 60) && near(pixel($image, 50, 3), BLUE, 70)
+    && $middle !== null && $middle[0] > $middle[2]);
+
+$image = radial(' gradientUnits="userSpaceOnUse" cx="50" cy="50" r="50"', $square);
+check('a user-space radial gradient is centred where it says',
+    near(pixel($image, 50, 50), RED, 60) && between(pixel($image, 50, 25)) && near(pixel($image, 97, 50), BLUE, 60));
+
+$image = radial(' gradientUnits="userSpaceOnUse" cx="30" cy="50" r="20"', '<rect y="25" width="100" height="50" fill="url(#r)"/>');
+check('a user-space radial gradient stays round in a wide shape',
+    near(pixel($image, 30, 50), RED, 60) && between(pixel($image, 40, 50)) && between(pixel($image, 30, 60))
+    && near(pixel($image, 30, 69), BLUE, 60) && near(pixel($image, 70, 50), BLUE, 60));
+
+$fadingRed = '<stop offset="0" stop-color="#ff0000"/><stop offset="1" stop-color="#ff0000" stop-opacity="0"/>';
+$image = radial('', $square, $fadingRed);
+check('a radial gradient fading to transparent shows its first stop in the middle and the page at its edge',
+    near(pixel($image, 50, 50), RED, 60) && near(pixel($image, 97, 50), WHITE, 40) && near(pixel($image, 3, 3), WHITE, 20));
+
+$glow = '<stop offset="0" stop-color="#0000ff" stop-opacity=".55"/><stop offset="1" stop-color="#0000ff" stop-opacity="0"/>';
+$image = radial('', '<ellipse cx="50" cy="50" rx="50" ry="25" fill="url(#r)"/>', $glow);
+// pdftoppm paints the focal point's own pixel twice, so the strongest point is read beside it
+check('a glow on an ellipse fades out at the edge of the ellipse, with no hard edge',
+    near(pixel($image, 52, 50), array(115, 115, 255), 40) && near(pixel($image, 75, 50), pixel($image, 50, 62), 12)
+    && near(pixel($image, 50, 73), WHITE, 30)
+    && near(pixel($image, 96, 50), WHITE, 30) && near(pixel($image, 50, 10), WHITE));
+
+$warnings = array();
+set_error_handler(function ($severity, $message) use (&$warnings) {
+    $warnings[] = $message;
+    return true;
+});
+$image = radial('', $square, '<stop stop-color="#ff0000"/><stop offset="1" stop-color="#0000ff"/>');
+restore_error_handler();
+check('a stop without an offset starts the gradient, with no warning', $warnings === array() && near(pixel($image, 50, 50), RED, 60));
+
+$image = radial(' gradientTransform="translate(0.25 0)"', $square);
+check('a bounding-box radial gradient transform moves it by fractions of the shape',
+    near(pixel($image, 75, 50), RED, 60) && near(pixel($image, 25, 50), BLUE, 70));
+
+$image = radial(' fx="2"', $square, null, $content);
+check('a focal point outside the circle is drawn on it, and leaves q and Q balanced',
+    balanced($content) && near(pixel($image, 97, 50), RED, 80) && near(pixel($image, 3, 50), BLUE, 60));
+
+$image = radial('', '<rect x="10" y="50" width="80" height="0" fill="url(#r)"/><rect x="60" y="60" width="30" height="30" fill="#00ff00"/>', null, $content);
+check('a bounding-box radial gradient on a shape with no height paints nothing and leaves q and Q balanced',
+    balanced($content) && near(pixel($image, 50, 50), WHITE) && near(pixel($image, 75, 75), GREEN));
+
 /**
  * Whether the page shows some colour other than white, and nothing but white and that colour.
  */
