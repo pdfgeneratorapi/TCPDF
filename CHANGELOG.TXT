@@ -1,3 +1,8 @@
+6.11.3.4 (2026-11-13)
+	- Fixed: an SVG radialGradient in objectBoundingBox units (the default) that left out cx, cy or r was read in percentage mode with 0.5 as its default, which became 0.5%, so the gradient was a dot in the corner of the shape and a glow fading to transparent drew nothing. cx, cy, r, fx and fy are now fractions of the shape's box, plain or as percentages, 50% when left out, as for linear gradients.
+	- Fixed: a bounding-box radial gradient is drawn in a unit square stretched over the shape's box, so on a non-square shape it is the ellipse the box makes, centred where SVG puts it; the gradientTransform applies in that square, the shading runs from the focal point (moved onto the circle when outside it), and a radius of 0 paints the last stop.
+	- Fixed: a stop without an offset attribute starts at 0 instead of raising an undefined array key warning.
+
 6.11.3.3 (2026-11-09)
 	- Fixed: an SVG image element whose data URI holds an SVG drew nothing; the data URI's media type now gives the image type, so the SVG is drawn as vectors. Media type parameters before ;base64, and percent-encoded text payloads, are read too.
 	- Fixed: an SVG image element skipped for a path that leaves its folder, or for a forbidden protocol, left a graphics state saved, unbalancing q and Q.
