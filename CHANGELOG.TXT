@@ -1,3 +1,6 @@
+6.11.3.6 (2026-11-23)
+	- Fixed: 6.11.3.5 held the first and last colours of a gradient to its ends also when its stop offsets run backwards, such as 0.5 then 0.2, which wrote decreasing bounds in the colour function: some viewers (Ghostscript) drew nothing where the gradient used to blend. A gradient whose offsets run backwards is again drawn as it was before 6.11.3.5, with no padding; stops that run forwards are padded as in 6.11.3.5.
+
 6.11.3.5 (2026-11-23)
 	- Fixed: a gradient whose first stop is above 0, or whose last stop is below 1, spread its colours over the whole gradient, because the colour function runs over [0 1] and its bounds were written from the interior stops only. Gradient() now holds the first colour (and its opacity) solid from 0 to the first stop, and the last colour from the last stop to 1, as browsers draw it. It applies to SVG gradients, linear and radial, in bounding-box and user-space units, and to every direct call of Gradient(): stops that do not span 0 to 1 are no longer stretched over the whole gradient, and two stops at the same offset draw a hard edge there.
 
