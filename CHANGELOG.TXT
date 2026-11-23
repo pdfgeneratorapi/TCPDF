@@ -1,3 +1,6 @@
+6.11.3.5 (2026-11-23)
+	- Fixed: an SVG gradient whose first stop is above 0, or whose last stop is below 1, spread its colours over the whole gradient, because the colour function runs over [0 1] and its bounds were written from the interior stops only. The first colour (and its opacity) is now held solid from 0 to the first stop, and the last colour from the last stop to 1, as browsers draw it, for linear and radial gradients, in bounding-box and user-space units.
+
 6.11.3.4 (2026-11-13)
 	- Fixed: an SVG radialGradient in objectBoundingBox units (the default) that left out cx, cy or r was read in percentage mode with 0.5 as its default, which became 0.5%, so the gradient was a dot in the corner of the shape and a glow fading to transparent drew nothing. cx, cy, r, fx and fy are now fractions of the shape's box, plain or as percentages, 50% when left out, as for linear gradients.
 	- Fixed: a bounding-box radial gradient is drawn in a unit square stretched over the shape's box, so on a non-square shape it is the ellipse the box makes, centred where SVG puts it; the gradientTransform applies in that square, the shading runs from the focal point (moved onto the circle when outside it), and a radius of 0 paints the last stop.
