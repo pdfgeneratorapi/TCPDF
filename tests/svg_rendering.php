@@ -391,6 +391,92 @@ $image = radial('', '<rect x="10" y="50" width="80" height="0" fill="url(#r)"/><
 check('a bounding-box radial gradient on a shape with no height paints nothing and leaves q and Q balanced',
     balanced($content) && near(pixel($image, 50, 50), WHITE) && near(pixel($image, 75, 75), GREEN));
 
+// --- gradient stops that do not span 0 to 1 --------------------------------------------
+
+/**
+ * Draws the whole page filled with a gradient of the given type, units and stops.
+ */
+function stopsGradient($element, $attributes, $stops, &$pdf_output = null)
+{
+    $pdf = createPdf();
+    $pdf->ImageSVG('@' . svg('<defs><' . $element . ' id="s"' . $attributes . '>' . $stops . '</' . $element . '></defs><rect width="100" height="100" fill="url(#s)"/>'), 0, 0, 100, 100);
+    $pdf_output = $pdf->Output('', 'S');
+    return rasterize($pdf);
+}
+
+const ACROSS = ' x1="0" y1="0" x2="1" y2="0"';
+const ACROSS_IN_USER_SPACE = ' gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="100" y2="0"';
+const AROUND_IN_USER_SPACE = ' gradientUnits="userSpaceOnUse" cx="50" cy="50" r="50"';
+
+$redToBlue = '<stop offset="%s" stop-color="#ff0000"/><stop offset="%s" stop-color="#0000ff"/>';
+
+foreach (array('bounding-box' => ACROSS, 'user-space' => ACROSS_IN_USER_SPACE) as $units => $attributes) {
+    $image = stopsGradient('linearGradient', $attributes, sprintf($redToBlue, '0.4', '0.6'));
+    check('a ' . $units . ' linear gradient keeps its first colour solid up to its first stop and its last colour from its last stop',
+        near(pixel($image, 10, 50), RED, 40) && near(pixel($image, 30, 50), RED, 40) && between(pixel($image, 50, 50))
+        && near(pixel($image, 70, 50), BLUE, 40) && near(pixel($image, 90, 50), BLUE, 40));
+}
+
+$image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '50%', '60%'));
+check('a linear gradient with percentage stops keeps its first colour solid up to its first stop', near(pixel($image, 30, 50), RED, 40) && near(pixel($image, 45, 50), RED, 40));
+
+$image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0.5', '1'));
+check('a linear gradient starting after 0 blends from its first stop to its end',
+    near(pixel($image, 20, 50), RED, 40) && near(pixel($image, 45, 50), RED, 40) && between(pixel($image, 75, 50)) && near(pixel($image, 97, 50), BLUE, 40));
+
+$image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0', '0.5'));
+check('a linear gradient ending before 1 keeps its last colour solid to the end',
+    near(pixel($image, 3, 50), RED, 40) && between(pixel($image, 25, 50)) && near(pixel($image, 60, 50), BLUE, 40) && near(pixel($image, 97, 50), BLUE, 40));
+
+$image = render(svg('<defs><linearGradient id="base"' . ACROSS . '>' . sprintf($redToBlue, '0.4', '0.6') . '</linearGradient><linearGradient id="s" href="#base"/></defs>'
+    . '<rect width="100" height="100" fill="url(#s)"/>'));
+check('a gradient reached through href keeps the first and last stop offsets of the gradient it references',
+    near(pixel($image, 30, 50), RED, 40) && between(pixel($image, 50, 50)) && near(pixel($image, 70, 50), BLUE, 40));
+
+$image = render(svg('<defs><linearGradient id="s"' . ACROSS . '>' . sprintf($redToBlue, '0.4', '0.6') . '</linearGradient>'
+    . '<pattern id="p" width="100" height="100" patternUnits="userSpaceOnUse"><rect width="100" height="100" fill="url(#s)"/></pattern></defs>'
+    . '<rect width="100" height="100" fill="url(#p)"/>'));
+check('a gradient in a pattern tile keeps the first and last stop offsets', near(pixel($image, 30, 50), RED, 40) && near(pixel($image, 70, 50), BLUE, 40));
+
+foreach (array('bounding-box' => '', 'user-space' => AROUND_IN_USER_SPACE) as $units => $attributes) {
+    $image = stopsGradient('radialGradient', $attributes, sprintf($redToBlue, '0.55', '1'));
+    check('a ' . $units . ' radial gradient keeps its first colour solid out to its first stop',
+        near(pixel($image, 70, 50), RED, 40) && near(pixel($image, 50, 70), RED, 40) && between(pixel($image, 88, 50)) && near(pixel($image, 97, 50), BLUE, 60));
+
+    $image = stopsGradient('radialGradient', $attributes, sprintf($redToBlue, '0', '0.5'));
+    check('a ' . $units . ' radial gradient ending before 1 keeps its last colour solid to its circle',
+        between(pixel($image, 60, 50)) && near(pixel($image, 80, 50), BLUE, 40) && near(pixel($image, 97, 50), BLUE, 40));
+}
+
+$fadeIn = '<stop offset="0.5" stop-color="#ff0000" stop-opacity="0"/><stop offset="1" stop-color="#ff0000"/>';
+$image = stopsGradient('linearGradient', ACROSS, $fadeIn);
+check('a transparent first stop stays transparent up to its offset',
+    near(pixel($image, 20, 50), WHITE, 20) && near(pixel($image, 45, 50), WHITE, 20) && near(pixel($image, 75, 50), array(255, 128, 128), 40) && near(pixel($image, 97, 50), RED, 40));
+
+$fadeOut = '<stop offset="0" stop-color="#ff0000"/><stop offset="0.5" stop-color="#ff0000" stop-opacity="0"/>';
+$image = stopsGradient('linearGradient', ACROSS, $fadeOut);
+check('a transparent last stop stays transparent from its offset',
+    near(pixel($image, 3, 50), RED, 40) && near(pixel($image, 25, 50), array(255, 128, 128), 40) && near(pixel($image, 60, 50), WHITE, 20) && near(pixel($image, 90, 50), WHITE, 20));
+
+stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0', '1'), $output);
+check('stops running from 0 to 1 are written as one colour function, with no bounds',
+    substr_count($output, '/FunctionType 2') === 1 && strpos($output, '/Bounds []') !== false);
+
+stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0.55', '1'), $output);
+check('stops starting after 0 are written with a solid colour function before the first stop',
+    substr_count($output, '/FunctionType 2') === 2 && strpos($output, '/Bounds [0.550000]') !== false);
+
+stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0.4', '0.6'), $output);
+check('stops that stop short of both ends are written with a solid colour function at each end',
+    substr_count($output, '/FunctionType 2') === 3 && strpos($output, '/Bounds [0.400000 0.600000]') !== false);
+
+$image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0.5', '0.5'));
+check('two stops at the same offset draw a hard edge there', near(pixel($image, 25, 50), RED, 40) && near(pixel($image, 75, 50), BLUE, 40));
+
+$image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '1', '1'));
+check('stops at the very end of the gradient draw the first colour all along',
+    near(pixel($image, 10, 50), RED, 40) && near(pixel($image, 50, 50), RED, 40) && near(pixel($image, 97, 50), RED, 40));
+
 /**
  * Whether the page shows some colour other than white, and nothing but white and that colour.
  */
