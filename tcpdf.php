@@ -15119,14 +15119,23 @@ class TCPDF {
 				}
 			}
 		}
-		// the colour function runs over [0 1], so the first stop is held back to 0 and the last forward to 1
+		// the colour function runs over [0 1], so the first stop is held back to 0 and the last forward to 1;
+		// stops whose offsets run backwards are left as they are, as padding them would write decreasing bounds
+		$ordered = true;
+		$num_colors = count($this->gradients[$n]['colors']);
+		for ($i = 1; $i < $num_colors; ++$i) {
+			if ($this->gradients[$n]['colors'][$i]['offset'] < $this->gradients[$n]['colors'][($i - 1)]['offset']) {
+				$ordered = false;
+				break;
+			}
+		}
 		$first_stop = $this->gradients[$n]['colors'][0];
-		if ($first_stop['offset'] > 0) {
+		if ($ordered AND ($first_stop['offset'] > 0)) {
 			$first_stop['offset'] = 0;
 			array_unshift($this->gradients[$n]['colors'], $first_stop);
 		}
 		$last_stop = $this->gradients[$n]['colors'][(count($this->gradients[$n]['colors']) - 1)];
-		if ($last_stop['offset'] < 1) {
+		if ($ordered AND ($last_stop['offset'] < 1)) {
 			$last_stop['offset'] = 1;
 			$this->gradients[$n]['colors'][] = $last_stop;
 		}
