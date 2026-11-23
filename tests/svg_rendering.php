@@ -478,11 +478,14 @@ check('stops at the very end of the gradient draw the first colour all along',
     near(pixel($image, 10, 50), RED, 40) && near(pixel($image, 50, 50), RED, 40) && near(pixel($image, 97, 50), RED, 40));
 
 /**
- * Whether no /Bounds list of the PDF has a value below the one before it, which a viewer may refuse to draw.
+ * Whether the PDF has a /Bounds list and none has a value below the one before it, which a viewer may refuse to draw.
  */
 function boundsNeverDecrease($pdf)
 {
     preg_match_all('/\/Bounds \[([^\]]*)\]/', $pdf, $lists);
+    if ($lists[1] === array()) {
+        return false;
+    }
     foreach ($lists[1] as $list) {
         $values = preg_split('/\s+/', trim($list), -1, PREG_SPLIT_NO_EMPTY);
         $sorted = $values;
