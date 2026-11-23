@@ -15119,6 +15119,17 @@ class TCPDF {
 				}
 			}
 		}
+		// the colour function runs over [0 1], so the first stop is held back to 0 and the last forward to 1
+		$first_stop = $this->gradients[$n]['colors'][0];
+		if ($first_stop['offset'] > 0) {
+			$first_stop['offset'] = 0;
+			array_unshift($this->gradients[$n]['colors'], $first_stop);
+		}
+		$last_stop = $this->gradients[$n]['colors'][(count($this->gradients[$n]['colors']) - 1)];
+		if ($last_stop['offset'] < 1) {
+			$last_stop['offset'] = 1;
+			$this->gradients[$n]['colors'][] = $last_stop;
+		}
 		if ($this->gradients[$n]['transparency']) {
 			// paint luminosity gradient
 			$this->_out('/TGS'.$n.' gs');
