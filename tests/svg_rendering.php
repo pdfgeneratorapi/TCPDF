@@ -470,6 +470,13 @@ stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0.4', '0.6'), $outp
 check('stops that stop short of both ends are written with a solid colour function at each end',
     substr_count($output, '/FunctionType 2') === 3 && strpos($output, '/Bounds [0.400000 0.600000]') !== false);
 
+$image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0.5', '0.5'));
+check('two stops at the same offset draw a hard edge there', near(pixel($image, 25, 50), RED, 40) && near(pixel($image, 75, 50), BLUE, 40));
+
+$image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '1', '1'));
+check('stops at the very end of the gradient draw the first colour all along',
+    near(pixel($image, 10, 50), RED, 40) && near(pixel($image, 50, 50), RED, 40) && near(pixel($image, 97, 50), RED, 40));
+
 /**
  * Whether the page shows some colour other than white, and nothing but white and that colour.
  */
