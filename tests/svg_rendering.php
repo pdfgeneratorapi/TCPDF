@@ -478,6 +478,41 @@ check('stops at the very end of the gradient draw the first colour all along',
     near(pixel($image, 10, 50), RED, 40) && near(pixel($image, 50, 50), RED, 40) && near(pixel($image, 97, 50), RED, 40));
 
 /**
+ * Whether the PDF has a /Bounds list and none has a value below the one before it, which a viewer may refuse to draw.
+ */
+function boundsNeverDecrease($pdf)
+{
+    preg_match_all('/\/Bounds \[([^\]]*)\]/', $pdf, $lists);
+    if ($lists[1] === array()) {
+        return false;
+    }
+    foreach ($lists[1] as $list) {
+        $values = preg_split('/\s+/', trim($list), -1, PREG_SPLIT_NO_EMPTY);
+        $sorted = $values;
+        sort($sorted, SORT_NUMERIC);
+        if ($values !== $sorted) {
+            return false;
+        }
+    }
+    return true;
+}
+
+foreach (array('a second stop before the first' => array('0.5', '0.2'), 'a first stop after the last' => array('0.8', '0.3')) as $name => $offsets) {
+    $image = stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, $offsets[0], $offsets[1]), $output);
+    check($name . ' is drawn as it was, blended over the whole gradient, with no bounds written',
+        strpos($output, '/Bounds []') !== false && substr_count($output, '/FunctionType 2') === 1
+        && near(pixel($image, 10, 50), RED, 40) && between(pixel($image, 50, 50)) && near(pixel($image, 90, 50), BLUE, 40));
+    check($name . ' writes no bounds that decrease', boundsNeverDecrease($output));
+}
+
+$image = stopsGradient('linearGradient', ACROSS, '<stop offset="0.2" stop-color="#ff0000"/><stop offset="0.8" stop-color="#00ff00"/><stop offset="0.5" stop-color="#0000ff"/>', $output);
+check('three stops that run backwards keep the bounds of the middle stop and are not padded',
+    strpos($output, '/Bounds [0.800000]') !== false && substr_count($output, '/FunctionType 2') === 2 && boundsNeverDecrease($output));
+
+stopsGradient('linearGradient', ACROSS, sprintf($redToBlue, '0.4', '0.6'), $output);
+check('stops that run forwards are still padded, and their bounds do not decrease', strpos($output, '/Bounds [0.400000 0.600000]') !== false && boundsNeverDecrease($output));
+
+/**
  * Whether the page shows some colour other than white, and nothing but white and that colour.
  */
 function paintedOnlyIn($image, $colour)
