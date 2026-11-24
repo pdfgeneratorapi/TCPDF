@@ -1,3 +1,6 @@
+6.11.3.7 (2026-11-24)
+	- Fixed: the soft mask of a translucent gradient painted the page rectangle in the space the gradient is drawn in, after its gradientTransform, so a rotated gradient put part of its shape outside the mask: PDFium (Chrome, Edge) cut it off along a straight edge. The mask now covers -14400 to 14400, the largest page PDF allows, on every side of that space's origin.
+
 6.11.3.6 (2026-11-23)
 	- Fixed: 6.11.3.5 held the first and last colours of a gradient to its ends also when its stop offsets run backwards, such as 0.5 then 0.2, which wrote decreasing bounds in the colour function: some viewers (Ghostscript) drew nothing where the gradient used to blend. A gradient whose offsets run backwards is again drawn as it was before 6.11.3.5, with no padding; stops that run forwards are padded as in 6.11.3.5.
 
