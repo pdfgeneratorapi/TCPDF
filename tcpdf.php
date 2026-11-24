@@ -15304,7 +15304,10 @@ class TCPDF {
 				$oid = $this->_newobj();
 				$this->xobjects['LX'.$oid] = array('n' => $oid);
 				$filter = '';
-				$stream = 'q /a0 gs /Pattern cs /p'.$idgs.' scn 0 0 '.$this->wPt.' '.$this->hPt.' re f Q';
+				// The mask is drawn in the space the gradient is painted in, which a gradientTransform can rotate or
+				// move away from the page: it covers the largest page PDF allows on every side of that space's origin.
+				$cover = 14400;
+				$stream = sprintf('q /a0 gs /Pattern cs /p%d scn %F %F %F %F re f Q', $idgs, -$cover, -$cover, 2 * $cover, 2 * $cover);
 				if ($this->compress) {
 					$filter = ' /Filter /FlateDecode';
 					$stream = gzcompress($stream);
@@ -15312,8 +15315,7 @@ class TCPDF {
 				$stream = $this->_getrawstream($stream);
 				$out = '<< /Type /XObject /Subtype /Form /FormType 1'.$filter;
 				$out .= ' /Length '.strlen($stream);
-				$rect = sprintf('%F %F', $this->wPt, $this->hPt);
-				$out .= ' /BBox [0 0 '.$rect.']';
+				$out .= sprintf(' /BBox [%F %F %F %F]', -$cover, -$cover, $cover, $cover);
 				$out .= ' /Group << /Type /Group /S /Transparency /CS /DeviceGray >>';
 				$out .= ' /Resources <<';
 				$out .= ' /ExtGState << /a0 << /ca 1 /CA 1 >> >>';

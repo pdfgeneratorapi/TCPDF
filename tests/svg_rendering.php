@@ -370,6 +370,40 @@ check('a glow on an ellipse fades out at the edge of the ellipse, with no hard e
     && near(pixel($image, 50, 73), WHITE, 30)
     && near(pixel($image, 96, 50), WHITE, 30) && near(pixel($image, 50, 10), WHITE));
 
+/**
+ * The rectangle a translucent gradient's soft mask paints, and the box its form is clipped to, as x0 y0 x1 y1.
+ */
+function maskCover($pdf_output)
+{
+    if (!preg_match('/scn (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+) re f Q/', $pdf_output, $rect)
+        || !preg_match('/\/BBox \[(-?[\d.]+) (-?[\d.]+) (-?[\d.]+) (-?[\d.]+)\] \/Group << \/Type \/Group \/S \/Transparency \/CS \/DeviceGray/', $pdf_output, $box)) {
+        return null;
+    }
+    return array(
+        'rect' => array((float) $rect[1], (float) $rect[2], (float) $rect[1] + (float) $rect[3], (float) $rect[2] + (float) $rect[4]),
+        'box' => array((float) $box[1], (float) $box[2], (float) $box[3], (float) $box[4]),
+    );
+}
+
+function covers($area, $low, $high)
+{
+    return $area[0] <= $low && $area[1] <= $low && $area[2] >= $high && $area[3] >= $high;
+}
+
+// The mask is drawn in the space the gradient is painted in, which a gradientTransform rotates, so the shape reaches
+// below that space's origin. PDFium leaves out what lies outside the mask and cuts the glow off along a straight
+// edge; poppler draws it whole, so the PDF is read.
+$rotated = array(
+    'bounding-box' => ' gradientTransform="rotate(25 0.5 0.5)"',
+    'user-space' => ' gradientUnits="userSpaceOnUse" cx="50" cy="50" r="50" gradientTransform="rotate(25)"',
+);
+foreach ($rotated as $units => $attributes) {
+    $image = stopsGradient('radialGradient', $attributes, $glow, $output);
+    $cover = maskCover($output);
+    check('the soft mask of a rotated, translucent ' . $units . ' radial gradient covers the page on every side of its origin',
+        $cover !== null && covers($cover['rect'], -100, 200) && covers($cover['box'], -100, 200) && !near(pixel($image, 50, 50), WHITE, 20));
+}
+
 $warnings = array();
 set_error_handler(function ($severity, $message) use (&$warnings) {
     $warnings[] = $message;
