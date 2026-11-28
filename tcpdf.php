@@ -1,7 +1,7 @@
 <?php
 //============================================================+
 // File name   : tcpdf.php
-// Version     : 6.11.3.7
+// Version     : 6.11.3.8
 // Begin       : 2002-08-03
 // Last Update : 2026-03-03
 // Author      : Nicola Asuni - Tecnick.com LTD - www.tecnick.com - info@tecnick.com
@@ -104,7 +104,7 @@
  * Tools to encode your unicode fonts are on fonts/utils directory.</p>
  * @package com.tecnick.tcpdf
  * @author Nicola Asuni
- * @version 6.11.3.7
+ * @version 6.11.3.8
  */
 
 // TCPDF configuration
@@ -128,7 +128,7 @@ require_once(dirname(__FILE__).'/include/tcpdf_static.php');
  * TCPDF project (http://www.tcpdf.org) has been originally derived in 2002 from the Public Domain FPDF class by Olivier Plathey (http://www.fpdf.org), but now is almost entirely rewritten.<br>
  * @package com.tecnick.tcpdf
  * @brief PHP class for generating PDF documents without requiring external extensions.
- * @version 6.11.3.7
+ * @version 6.11.3.8
  * @author Nicola Asuni - info@tecnick.com
  * @IgnoreAnnotation("protected")
  * @IgnoreAnnotation("public")
@@ -9313,6 +9313,7 @@ class TCPDF {
 			$font = $this->getFontBuffer($k);
 			$type = $font['type'];
 			$name = $font['name'];
+			$tounicode = TCPDF_FONTS::getSymbolicToUnicodeCMap($type, $name);
 			if ($type == 'core') {
 				// standard core font
 				$out = $this->_getobj($this->font_obj_ids[$k])."\n";
@@ -9323,6 +9324,9 @@ class TCPDF {
 				if ((strtolower($name) != 'symbol') AND (strtolower($name) != 'zapfdingbats')) {
 					$out .= ' /Encoding /WinAnsiEncoding';
 				}
+				if ($tounicode !== false) {
+					$out .= ' /ToUnicode '.($this->n + 1).' 0 R';
+				}
 				if ($k == 'helvetica') {
 					// add default font for annotations
 					$this->annotation_fonts[$k] = $font['i'];
@@ -9330,6 +9334,9 @@ class TCPDF {
 				$out .= ' >>';
 				$out .= "\n".'endobj';
 				$this->_out($out);
+				if ($tounicode !== false) {
+					$this->_puttounicodecmap($tounicode);
+				}
 			} elseif (($type == 'Type1') OR ($type == 'TrueType')) {
 				// additional Type1 or TrueType font
 				$out = $this->_getobj($this->font_obj_ids[$k])."\n";
@@ -9346,6 +9353,10 @@ class TCPDF {
 					} else {
 						$out .= ' /Encoding /WinAnsiEncoding';
 					}
+				}
+				if ($tounicode !== false) {
+					// written after the widths and the descriptor
+					$out .= ' /ToUnicode '.($this->n + 3).' 0 R';
 				}
 				$out .= ' >>';
 				$out .= "\n".'endobj';
@@ -9378,6 +9389,9 @@ class TCPDF {
 				$s .= '>>';
 				$s .= "\n".'endobj';
 				$this->_out($s);
+				if ($tounicode !== false) {
+					$this->_puttounicodecmap($tounicode);
+				}
 			} else {
 				// additional types
 				$mtd = '_put'.strtolower($type);
@@ -9420,6 +9434,19 @@ class TCPDF {
 		$font['cw'] = $cw;
 		$font['subsetchars'] = $subsetchars;
 		return $font;
+	}
+
+	/**
+	 * Output a ToUnicode CMap as a new stream object.
+	 * @param string $cmap ToUnicode CMap
+	 * @protected
+	 */
+	protected function _puttounicodecmap($cmap) {
+		$this->_newobj();
+		$stream = ($this->compress) ? gzcompress($cmap) : $cmap;
+		$filter = ($this->compress) ? '/Filter /FlateDecode ' : '';
+		$stream = $this->_getrawstream($stream);
+		$this->_out('<<'.$filter.'/Length '.strlen($stream).'>> stream'."\n".$stream."\n".'endstream'."\n".'endobj');
 	}
 
 	/**

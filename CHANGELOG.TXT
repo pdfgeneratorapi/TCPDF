@@ -1,3 +1,6 @@
+6.11.3.8 (2026-11-28)
+	- Fixed: the symbolic standard fonts, Symbol and ZapfDingbats, had no ToUnicode CMap, as core fonts and as the fonts embedded in PDF/A mode, and their glyph names are not Unicode names, so the text drawn with them could not be extracted and PDF/UA-1 (ISO 14289-1, 7.21.7) failed on every glyph used, such as a check mark drawn with ZapfDingbats "4". Both now carry one: ZapfDingbats as the ITC Zapf Dingbats Glyph List maps its glyphs, Symbol as Adobe's Symbol encoding maps its codes, with the Greek letter where Adobe gives two values (Delta, Omega, mu). Fonts added with AddFont() are unchanged.
+
 6.11.3.7 (2026-11-24)
 	- Fixed: the soft mask of a translucent gradient painted the page rectangle in the space the gradient is drawn in, after its gradientTransform, so a rotated gradient put part of its shape outside the mask: PDFium (Chrome, Edge) cut it off along a straight edge. The mask now covers -14400 to 14400, the largest page PDF allows, on every side of that space's origin.
 
