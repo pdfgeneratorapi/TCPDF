@@ -308,6 +308,41 @@ else
     fi
 fi
 
+echo "File: tests/symbolic_font_tounicode.php"
+${PHP_BINARY} -n \
+    -d date.timezone=UTC \
+    ${BCMATH_EXT} \
+    ${CURL_EXT} \
+    -d display_errors=on \
+    -d error_reporting=-1 \
+    -d memory_limit=1G \
+    "${TESTS_DIR}/symbolic_font_tounicode.php" "${OUTPUT_FILE}"
+if [ $? -gt 0 ]; then
+    FAILED_FLAG=1
+    echo "File-run-failed: tests/symbolic_font_tounicode.php"
+else
+    VALIDATION_OUTPUT="$(docker run -v $TEMP_FOLDER:/data --quiet --rm -w /data/ pdfix/verapdf-validation:latest validate --format 'json' -i 'output.pdf')"
+    VALIDATION_RESULT="$(echo $VALIDATION_OUTPUT |  jq '.report.jobs[0].validationResult[0].compliant')"
+    if [ "$VALIDATION_RESULT" = "false" ]; then
+        FAILED_FLAG=1
+        echo "Generated pdf file failed validation: tests/symbolic_font_tounicode.php"
+        echo $VALIDATION_OUTPUT
+    else
+        VALIDATION_PROFILE="$(echo $VALIDATION_OUTPUT |  jq '.report.jobs[0].validationResult[0].profileName')"
+        echo "Pdf validated with $VALIDATION_PROFILE: tests/symbolic_font_tounicode.php"
+    fi
+    # The page is not tagged, so it is not PDF/UA: only the font rule is checked
+    UA_OUTPUT="$(docker run -v $TEMP_FOLDER:/data --quiet --rm -w /data/ pdfix/verapdf-validation:latest validate --flavour ua1 --format 'json' -i 'output.pdf')"
+    UA_FONT_FAILURES="$(echo "$UA_OUTPUT" | jq '[.report.jobs[0].validationResult[0].details.ruleSummaries[] | select(.clause == "7.21.7" and .ruleStatus == "FAILED")] | length')"
+    if [ "$UA_FONT_FAILURES" != "0" ]; then
+        FAILED_FLAG=1
+        echo "Generated pdf file fails PDF/UA-1 7.21.7 (ToUnicode): tests/symbolic_font_tounicode.php"
+        echo "$UA_OUTPUT" | jq '.report.jobs[0].validationResult[0].details.ruleSummaries[] | select(.clause == "7.21.7")'
+    else
+        echo "Pdf passes PDF/UA-1 7.21.7 (ToUnicode): tests/symbolic_font_tounicode.php"
+    fi
+fi
+
 for ACROFORM_RUN in "" "without-helvetica"; do
     echo "File: tests/acroform_default_font.php ${ACROFORM_RUN}"
     ${PHP_BINARY} -n \

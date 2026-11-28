@@ -1672,6 +1672,40 @@ class TCPDF_FONTS {
 	}
 
 	/**
+	 * Return the ToUnicode CMap of a symbolic standard font: Symbol or ZapfDingbats, as the core
+	 * font or as the font embedded in PDF/A mode. Their glyph names are not Unicode names, so
+	 * without it the text drawn with them cannot be extracted (PDF/UA-1, ISO 14289-1, 7.21.7).
+	 * @param string $type font type
+	 * @param string $name font name
+	 * @return string|false ToUnicode CMap, or false for any other font.
+	 * @public static
+	 */
+	public static function getSymbolicToUnicodeCMap($type, $name) {
+		// only the fonts TCPDF ships: an added Type1 font may be named Symbol with another encoding
+		$families = array(
+			'core' => array('symbol' => 'symbol', 'zapfdingbats' => 'zapfdingbats'),
+			'Type1' => array('pdfasymbol' => 'symbol', 'pdfazapfdingbats' => 'zapfdingbats'),
+		);
+		$name = strtolower($name);
+		if (!isset($families[$type][$name])) {
+			return false;
+		}
+		$chars = array();
+		foreach (TCPDF_FONT_DATA::$symbolic_unicode[$families[$type][$name]] as $code => $unicode) {
+			$chars[] = sprintf('<%02x> <%04x>', $code, $unicode);
+		}
+		$cmap = '/CIDInit /ProcSet findresource begin'."\n".'12 dict begin'."\n".'begincmap'."\n";
+		$cmap .= '/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def'."\n";
+		$cmap .= '/CMapName /TCPDF-'.$families[$type][$name].'-UCS def'."\n".'/CMapType 2 def'."\n";
+		$cmap .= '1 begincodespacerange'."\n".'<00> <FF>'."\n".'endcodespacerange'."\n";
+		foreach (array_chunk($chars, 100) as $chunk) {
+			$cmap .= count($chunk).' beginbfchar'."\n".implode("\n", $chunk)."\n".'endbfchar'."\n";
+		}
+		$cmap .= 'endcmap'."\n".'CMapName currentdict /CMap defineresource pop'."\n".'end'."\n".'end';
+		return $cmap;
+	}
+
+	/**
 	 * Return fonts path
 	 * @return string
 	 * @public static
